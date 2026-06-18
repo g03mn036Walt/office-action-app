@@ -1,5 +1,6 @@
 import { createBrowserClient } from "@supabase/ssr";
 
+import type { Database } from "@/lib/database.types";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
 
 /**
@@ -7,5 +8,5 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
  * anon key を使うため RLS が有効。ユーザー自身のデータのみアクセス可。
  */
 export function createClient() {
-  return createBrowserClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  return createBrowserClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
