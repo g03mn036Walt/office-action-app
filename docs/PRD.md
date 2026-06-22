@@ -268,11 +268,12 @@
 
 > デザインは **Claude チャットライク**。視覚設計は **Claude Design** を正とする（運用は §9.0）。
 
-### 9.0 デザイン運用（Claude Design + /design-sync）
+### 9.0 デザイン運用（Claude Design 取り込み）
 - 視覚設計の正は **claude.ai/design の通常デザインプロジェクト `office-action-app-ui`**（種別はデザインシステムではなく通常デザイン。取り込み手順・projectId は CLAUDE.md「UI / デザイン」を参照）。カラー/タイポ/間隔と、ボタン・入力欄・サイドバー・チャットバブル・カード・モーダル等の再利用コンポーネントをそこで定義する。
-- 取り込みは Claude Code の **`/design-sync`（DesignSync）** で `components/ui/` へ **1コンポーネントずつ**同期する（全置換しない）。
-- 画面（§9.1/§9.2）は同期した `components/ui` を組み合わせて Tailwind で実装する。場当たりのスタイルを増やさず、デザインシステム由来のトークン/コンポーネントに従う。
-- **タイミング**: Phase 1 の 1-1（シェル UI）着手前にデザインシステムを用意。画面追加時も `components/ui` を拡張同期する。
+- 取り込み手順: 各画面の **「Hand off the project to Claude Code」** で projectId とファイル名（例 `Login.dc.html`）を取得 → DesignSync（`/design-sync`）の `get_file` で `.dc.html` を読み、**React/Tailwind に手動翻訳して `components/ui/` へ 1コンポーネントずつ実装**する（全置換しない／生 `.dc.html` は実行時に使わない）。
+- DesignSync の自動同期（`write_files` 系）は **design-system 専用**で、通常デザインプロジェクトの `office-action-app-ui` には使えない（`get_file` 等の読み取りのみ可・実地検証済み）。手順詳細は CLAUDE.md「UI / デザイン」。
+- 画面（§9.1/§9.2）は実装した `components/ui` を組み合わせて Tailwind で実装する。場当たりのスタイルを増やさず、デザインシステム由来のトークン/コンポーネントに従う。
+- **タイミング**: Phase 1 の 1-1（シェル UI）着手前に主要コンポーネントを用意。画面追加時も `components/ui` を拡張する。
 
 ### 9.1 ログイン / サインアップ画面
 - Google 認証ボタン、Email/Password のログイン・サインアップ。
