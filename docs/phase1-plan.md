@@ -40,20 +40,48 @@
 - [x] `git commit`
 
 ## Slice 2: ファイルアップロード + Files API（Step1）
-ねらい: 4 種別の文書を保存し、PDF を Files API に載せて `file_id` を持つ。
+ねらい: 4 種別の文書を保存し、PDF を Files API に載せて `file_id` を持つ。複数ファイル（OA 複数回・引用文献複数・過去補正書/意見書）を扱える。
+
+### 経路（確定）: クライアント直 Storage → サーバーで Files API
+- クライアント（`lib/supabase/client.ts`）が `case-files` に直 put（path = `{user_id}/{case_id}/{filename}`）。Storage RLS（migration 0003: `foldername(name)[1] == auth.uid()`）が owner 限定を担保。Server Action の bodySizeLimit（既定 1MB）を回避し大きい特許 PDF・100ページ超に耐える。
+- 完了後、path・doc_role・file_name・file_type を Server Action `registerUploadedFile` に渡す。
+- サーバー（`lib/supabase/server.ts`＝RLS下）が Storage から download し:
+  - PDF → `lib/anthropic/files.ts` で Files API upload（beta ヘッダ `files-api-2025-04-14`）→ `anthropic_file_id` 保存。抽出はしない（Claude ネイティブ読込／全文化は Slice 3 の Step2）。
+  - .docx/.txt/.md/.csv → `lib/extract/text.ts` で抽出 → `extracted_text` 保存（Files API には載せない＝コスト方針 CLAUDE.md ガードレール5）。
+- **クリーンアップ順序**: Files API upload／抽出が成功してから `case_files` 行を insert。失敗時は直前に put した Storage オブジェクトを `remove` し孤児を残さない。`admin.ts` は使わない（RLS 原則維持）。
+
+### doc_role と多重度（PRD §236 の4語彙を維持。補正書/意見書は claims に格納し新 role は増やさない）
+| doc_role | ラベル | 多重度 |
+|---|---|---|
+| `applicant` | 本願明細書 | **1件のみ**（既存があれば UI で追加不可。差し替えは削除→再アップロード） |
+| `oa` | OA（拒絶理由） | 複数可（時系列で複数回） |
+| `reference` | 引用文献 | 複数可 |
+| `claims` | 現クレーム（過去の補正書・意見書を含む） | 複数可 |
+
+複数管理のため**個別ファイル削除**（`deleteFile`）を用意する。
 
 主な新規/変更ファイル:
-- `lib/anthropic/files.ts` … Files API の upload/delete ラッパ。beta ヘッダ `files-api-2025-04-14` 必須（CLAUDE.md ガードレール4、PRD §7.4）。`getAnthropic()` 再利用
-- `lib/config/docRoles.ts` … doc_role（applicant/oa/reference/claims）の定義・ラベル
-- `lib/extract/text.ts` … .docx=mammoth、.txt/.md/.csv=デコードのみ（PDF はここで抽出しない＝Claude ネイティブ）
-- `components/FileUpload.tsx` … 4 種別の D&D/ボタン受付、公報番号・対象国（JP/US/EP/WO/CN）入力
-- アップロード処理（Server Action or Route）… Storage `{user_id}/{case_id}/{filename}` 保存 → PDF は Files API へ → `case_files.anthropic_file_id` 保存 → `case_files` レコード作成 → `cases.publication_number/country/title` 更新
-- 案件削除の拡張 … 削除時に各 `anthropic_file_id` を Files API DELETE（CLAUDE.md ガードレール4）
+- `lib/anthropic/files.ts` … Files API の upload/delete ラッパ。`getAnthropic()` 再利用、beta ヘッダ。Supabase の `Blob` → SDK file 変換（`toFile`）。シグネチャは着手時に `/claude-api` で確認（CLAUDE.md ガードレール4、PRD §7.4）
+- `lib/config/docRoles.ts` … doc_role 定義・ラベル・多重度（`applicant` のみ単一）・受理拡張子。doc_role 語彙の単一の正
+- `lib/extract/text.ts` … .docx=mammoth、.txt/.md/.csv=デコードのみ（PDF はここで抽出しない＝Claude ネイティブ）。抽出分岐は `file_name` の拡張子で判定（ブラウザ MIME は不正確なことがあるため）。`file_type` には MIME を保存
+- `components/app/FileUpload.tsx` … 役割ごとのリスト形式 UI（`applicant` は1件、`oa`/`reference`/`claims` は追加可）。ブラウザ直アップロード → `registerUploadedFile` 呼び出し。既存規約に合わせ `components/app/` に置く
+- `lib/cases/actions.ts`:
+  - `registerUploadedFile` 追加 … メタ受領 → download → PDF は Files API／他は抽出 → `case_files` insert（上記クリーンアップ順序）→ `revalidatePath`。`applicant` は insert 前に既存行があれば拒否（UI 側でも追加抑止）
+  - `deleteFile` 追加 … 個別ファイル削除（Storage `remove` + Files API DELETE + `case_files` 行削除）
+  - `deleteCase` 拡張 … 削除前に当該 case の `storage_path`／`anthropic_file_id` を全取得 → Storage `remove`（複数パス）+ 各 `anthropic_file_id` を Files API DELETE → `cases` 行削除（Storage は FK cascade 対象外のため明示削除が必須）
+- `components/app/NewCaseModal.tsx` … プレースホルダ文書 grid を撤去し公報番号/対象国のみに簡素化（アップロードは案件ビューへ。パスが `case_id` を要求し作成前は配置できないため。NewCase.dc.html とは乖離 → 再 handoff は後追い）
+- `app/(app)/case/[id]/page.tsx` … `case_files` を役割別に取得・表示し `FileUpload` を配線
 - 依存追加: `mammoth`（npm install）
 
+着手単位:
+- **2a 基盤**: `mammoth` 追加 / `docRoles.ts` / `extract/text.ts` / `anthropic/files.ts` / `actions.ts` に `registerUploadedFile`・`deleteFile` 追加＋`deleteCase` 拡張
+- **2b UI 配線**: `case/[id]/page.tsx` の表示、`FileUpload.tsx`、`NewCaseModal` 簡素化
+
 確認:
-- [ ] アップロード後 Storage / `case_files` 行 / `anthropic_file_id` を MCP 確認
-- [ ] 削除で Storage と Files API が消える
+- [ ] `applicant` は2件目を追加不可、`oa`/`reference`/`claims` は複数行が入る
+- [ ] アップロード後 Storage / `case_files` 行 / `anthropic_file_id`（PDF のみ）を MCP 確認
+- [ ] 個別ファイル削除で Storage と Files API が消える
+- [ ] 案件削除で当該 case の全ファイルの Storage と Files API が消える
 - [ ] `npm run build` / `npm run lint`
 - [ ] `git commit`
 
