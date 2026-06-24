@@ -9,7 +9,7 @@
 ## 現在地
 - [x] Phase 0（基盤）完了 — DB 全テーブル+RLS+Storage、Supabase 3 クライアント、認証（login/callback/signout/requireUser）、Anthropic サーバークライアント、`lib/config/models.ts`、疎通用 `app/api/chat/route.ts`、デザイントークン（`globals.css @theme`）+ Brandmark + login 画面
 - [x] Slice 1 — アプリシェル + 案件 CRUD（削除に確認ダイアログ追加済み）
-- [ ] Slice 2 — ファイルアップロード + Files API（Step1）
+- [ ] Slice 2 — ファイルアップロード + Files API（Step1）※2a 基盤=実装済み（build/lint 緑）。2b UI 配線が残り
 - [ ] Slice 3 — チャット + Step2-3（縦の一本完成）→ Vercel デプロイ確認
 
 ## 進め方の原則（詳細は CLAUDE.md / PRD §14）
@@ -74,7 +74,7 @@
 - 依存追加: `mammoth`（npm install）
 
 着手単位:
-- **2a 基盤**: `mammoth` 追加 / `docRoles.ts` / `extract/text.ts` / `anthropic/files.ts` / `actions.ts` に `registerUploadedFile`・`deleteFile` 追加＋`deleteCase` 拡張
+- **2a 基盤** ✅ 実装済み（build/lint 緑。実アップロード/DB の確認はローカル）: `mammoth` 追加 / `docRoles.ts` / `extract/text.ts` / `anthropic/files.ts` / `actions.ts` に `registerUploadedFile`・`deleteFile` 追加＋`deleteCase` 拡張
 - **2b UI 配線**: `case/[id]/page.tsx` の表示、`FileUpload.tsx`、`NewCaseModal` 簡素化
 
 確認:
@@ -82,7 +82,7 @@
 - [ ] アップロード後 Storage / `case_files` 行 / `anthropic_file_id`（PDF のみ）を MCP 確認
 - [ ] 個別ファイル削除で Storage と Files API が消える
 - [ ] 案件削除で当該 case の全ファイルの Storage と Files API が消える
-- [ ] `npm run build` / `npm run lint`
+- [x] `npm run build` / `npm run lint`（2a 実装後に緑）
 - [ ] `git commit`
 
 ## Slice 3: チャット + Step2-3（解析・テキスト化・要約）★縦の一本完成
