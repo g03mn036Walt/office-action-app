@@ -9,7 +9,7 @@
 ## 現在地
 - [x] Phase 0（基盤）完了 — DB 全テーブル+RLS+Storage、Supabase 3 クライアント、認証（login/callback/signout/requireUser）、Anthropic サーバークライアント、`lib/config/models.ts`、疎通用 `app/api/chat/route.ts`、デザイントークン（`globals.css @theme`）+ Brandmark + login 画面
 - [x] Slice 1 — アプリシェル + 案件 CRUD（削除に確認ダイアログ追加済み）
-- [ ] Slice 2 — ファイルアップロード + Files API（Step1）※2a 基盤=実装済み（build/lint 緑）。2b UI 配線が残り
+- [ ] Slice 2 — ファイルアップロード + Files API（Step1）※2a 基盤+2b UI 配線=実装済み（build/lint 緑）。実アップロード/DB のローカル E2E 検証が残り（完了後に Slice 2 を1 PR でマージ）
 - [ ] Slice 3 — チャット + Step2-3（縦の一本完成）→ Vercel デプロイ確認
 
 ## 進め方の原則（詳細は CLAUDE.md / PRD §14）
@@ -75,15 +75,15 @@
 
 着手単位:
 - **2a 基盤** ✅ 実装済み（build/lint 緑。実アップロード/DB の確認はローカル）: `mammoth` 追加 / `docRoles.ts` / `extract/text.ts` / `anthropic/files.ts` / `actions.ts` に `registerUploadedFile`・`deleteFile` 追加＋`deleteCase` 拡張
-- **2b UI 配線**: `case/[id]/page.tsx` の表示、`FileUpload.tsx`、`NewCaseModal` 簡素化
+- **2b UI 配線** ✅ 実装済み（build/lint 緑。実アップロード/DB の E2E 確認はローカル）: `case/[id]/page.tsx` の役割別表示、`FileUpload.tsx`（ブラウザ直 put → `registerUploadedFile`）、`DeleteFileButton.tsx`（個別削除）、`NewCaseModal` 簡素化
 
 確認:
 - [ ] `applicant` は2件目を追加不可、`oa`/`reference`/`claims` は複数行が入る
 - [ ] アップロード後 Storage / `case_files` 行 / `anthropic_file_id`（PDF のみ）を MCP 確認
 - [ ] 個別ファイル削除で Storage と Files API が消える
 - [ ] 案件削除で当該 case の全ファイルの Storage と Files API が消える
-- [x] `npm run build` / `npm run lint`（2a 実装後に緑）
-- [ ] `git commit`
+- [x] `npm run build` / `npm run lint`（2a/2b 実装後に緑）
+- [x] `git commit`（2b 実装）
 
 ## Slice 3: チャット + Step2-3（解析・テキスト化・要約）★縦の一本完成
 ねらい: 送信すると各文書の全文テキスト化＋概要がストリーミング表示され DB に残る。

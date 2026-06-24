@@ -1,13 +1,22 @@
 import { notFound } from "next/navigation";
 
+import { DeleteFileButton } from "@/components/app/DeleteFileButton";
+import { FileUpload } from "@/components/app/FileUpload";
 import { requireUser } from "@/lib/auth";
+import { DOC_ROLES, type DocRole } from "@/lib/config/docRoles";
 import { stepLabel } from "@/lib/config/steps";
+import type { Database } from "@/lib/database.types";
+
+/** 一覧表示に必要な case_files の最小フィールド（機密本文 extracted_text は取得しない）。 */
+type CaseFileRow = Pick<
+  Database["public"]["Tables"]["case_files"]["Row"],
+  "id" | "doc_role" | "file_name" | "file_type" | "anthropic_file_id" | "created_at"
+>;
 
 /**
- * 案件ビュー（/case/[id]）。AppShell のメイン側（ヘッダ＋チャット＋入力枠）。
+ * 案件ビュー（/case/[id]）。AppShell のメイン側（ヘッダ＋文書＋チャット枠）。
  *
- * Slice 1 ではヘッダ（案件タイトル・対象国・ステップ）まで実装し、
- * チャット表示・送信は Slice 3、文書アップロードは Slice 2 で配線する。
+ * Slice 2b で文書アップロード（役割別）を配線。チャット表示・送信は Slice 3。
  * Next.js 16 では params が Promise なので await する。
  */
 export default async function CasePage({
@@ -16,7 +25,7 @@ export default async function CasePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { supabase } = await requireUser();
+  const { supabase, user } = await requireUser();
 
   const { data: caseRow } = await supabase
     .from("cases")
@@ -27,6 +36,16 @@ export default async function CasePage({
   if (!caseRow) {
     notFound();
   }
+
+  // 機密本文（extracted_text / summary）は一覧表示に不要なので取得しない（ガードレール7）。
+  const { data: files } = await supabase
+    .from("case_files")
+    .select("id, doc_role, file_name, file_type, anthropic_file_id, created_at")
+    .eq("case_id", id)
+    .order("created_at", { ascending: true });
+
+  const caseFiles: CaseFileRow[] = files ?? [];
+  const byRole = (role: DocRole) => caseFiles.filter((f) => f.doc_role === role);
 
   const title = caseRow.title || caseRow.publication_number || "無題";
 
@@ -45,11 +64,56 @@ export default async function CasePage({
         </span>
       </div>
 
-      {/* チャット（Slice 3 で配線） */}
+      {/* 文書（役割別アップロード）＋チャット */}
       <div className="flex-1 overflow-y-auto py-7">
         <div className="mx-auto max-w-[720px] px-6">
-          <p className="text-sm text-muted">
-            この案件のチャットは Step3（要約）実装後に表示されます。まずは文書をアップロードしてください（アップロードは次の実装段階で有効化）。
+          <section className="space-y-5">
+            {DOC_ROLES.map((meta) => {
+              const roleFiles = byRole(meta.role);
+              return (
+                <div key={meta.role}>
+                  <div className="mb-2 flex items-baseline gap-2">
+                    <h2 className="text-[13px] font-semibold text-ink-soft">{meta.label}</h2>
+                    {meta.single && (
+                      <span className="text-[11px] text-faint">（1件のみ）</span>
+                    )}
+                  </div>
+
+                  {roleFiles.length > 0 && (
+                    <ul className="mb-2 space-y-1">
+                      {roleFiles.map((f) => (
+                        <li
+                          key={f.id}
+                          className="flex items-center gap-2 rounded-[9px] border border-line bg-surface px-3 py-2"
+                        >
+                          <span className="min-w-0 flex-1 truncate text-[13px] text-ink-soft">
+                            {f.file_name}
+                          </span>
+                          {f.anthropic_file_id && (
+                            <span className="shrink-0 rounded-full bg-cream px-2 py-0.5 text-[10.5px] text-muted">
+                              PDF
+                            </span>
+                          )}
+                          <DeleteFileButton fileId={f.id} fileName={f.file_name} />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  <FileUpload
+                    caseId={id}
+                    userId={user.id}
+                    role={meta.role}
+                    disabled={meta.single && roleFiles.length > 0}
+                  />
+                </div>
+              );
+            })}
+          </section>
+
+          {/* チャット（Slice 3 で配線） */}
+          <p className="mt-8 text-sm text-muted">
+            この案件のチャットは Step3（要約）実装後に表示されます。まずは文書をアップロードしてください。
           </p>
         </div>
       </div>
