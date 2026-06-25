@@ -16,8 +16,10 @@ import { createClient } from "@/lib/supabase/client";
 /**
  * 役割別ファイルアップロードタイル（Slice 2b）。
  *
- * ブラウザから直接 Supabase Storage に put（パス {user_id}/{case_id}/{filename}）し、
+ * ブラウザから直接 Supabase Storage に put（パス {user_id}/{case_id}/{uuid}.{ext}）し、
  * 続けて registerUploadedFile（Server Action）を呼んで case_files に登録する。
+ * Storage のキーは ASCII のみ許可（日本語名は Invalid key で拒否される）ため、
+ * オブジェクト名には UUID を使い、原名は DB の file_name に保持する。
  * PDF は Files API へ、その他はサーバー側でテキスト抽出される（2a 実装）。
  *
  * userId は server page（requireUser 済み）から prop で受け取る。Storage の RLS は
@@ -56,7 +58,8 @@ export function FileUpload({
     setError(null);
 
     // 前段検証（サーバー側でも拡張子判定で再検証される）。
-    if (!isAcceptedExtension(extensionOf(file.name))) {
+    const ext = extensionOf(file.name);
+    if (!isAcceptedExtension(ext)) {
       setError("対応していないファイル形式です（PDF / DOCX / TXT / MD / CSV）");
       return;
     }
@@ -64,7 +67,9 @@ export function FileUpload({
     startTransition(async () => {
       try {
         const supabase = createClient();
-        const storagePath = `${userId}/${caseId}/${file.name}`;
+        // Storage キーは ASCII のみ許可されるため UUID を使う（原名は file_name に保存）。
+        // 毎回ユニークなので同名ファイルの衝突（upsert:false）も起きない。
+        const storagePath = `${userId}/${caseId}/${crypto.randomUUID()}.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from("case-files")
           .upload(storagePath, file, {

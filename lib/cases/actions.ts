@@ -17,7 +17,7 @@ import { extractText } from "@/lib/extract/text";
  * router.push で遷移する（Server Action 内 redirect の try/catch 落とし穴回避）。
  */
 
-/** アップロード文書を置く Storage バケット（migration 0003、path = {user_id}/{case_id}/{filename}）。 */
+/** アップロード文書を置く Storage バケット（migration 0003、path = {user_id}/{case_id}/{uuid}.{ext}）。 */
 const CASE_FILES_BUCKET = "case-files";
 
 export type CreateCaseInput = {
@@ -112,7 +112,7 @@ export type RegisterUploadedFileInput = {
   fileName: string;
   /** ブラウザ由来の MIME。保存用（抽出/分岐には使わない＝拡張子で判定）。 */
   fileType: string | null;
-  /** クライアントが put した Storage パス（{user_id}/{case_id}/{filename}）。 */
+  /** クライアントが put した Storage パス（{user_id}/{case_id}/{uuid}.{ext}）。 */
   storagePath: string;
 };
 
