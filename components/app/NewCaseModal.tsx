@@ -9,12 +9,9 @@ import { createCase } from "@/lib/cases/actions";
 /**
  * 新規案件作成モーダル（Claude Design: NewCase.dc.html の翻訳）。
  *
- * Slice 1 では公報番号・対象国の入力 → 案件作成 → 案件画面へ遷移までを担う。
- * 4文書のドロップ欄はデザイン通り配置するが、Storage + Files API への配線は
- * Slice 2 で行うため、ここでは無効表示（操作不可）にしている。
+ * 公報番号・対象国の入力 → 案件作成 → 案件画面へ遷移までを担う。
+ * 文書アップロードは案件画面（/case/[id]）で役割別に行う（Slice 2b）。
  */
-
-const DOC_ROLES = ["本願明細書", "OA（拒絶理由）", "引用文献", "現クレーム"] as const;
 
 export function NewCaseModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
@@ -50,7 +47,7 @@ export function NewCaseModal({ open, onClose }: { open: boolean; onClose: () => 
         <div className="border-b border-line px-[26px] py-[22px]">
           <h2 className="font-serif text-xl text-ink">新規案件</h2>
           <p className="mt-1 text-[13px] text-muted">
-            公報番号と対象国を入力し、関連文書をアップロードしてください。
+            公報番号と対象国を入力してください。文書は作成後の案件画面でアップロードします。
           </p>
         </div>
 
@@ -86,28 +83,7 @@ export function NewCaseModal({ open, onClose }: { open: boolean; onClose: () => 
             </div>
           </div>
 
-          <label className="mb-[7px] block text-[13px] font-semibold text-ink-soft">
-            文書アップロード
-          </label>
-          {/* Slice 2 で配線。現状はデザイン表示のみ（操作不可）。 */}
-          <div className="grid grid-cols-2 gap-3 opacity-50">
-            {DOC_ROLES.map((role) => (
-              <div
-                key={role}
-                aria-disabled
-                className="cursor-not-allowed rounded-[11px] border-[1.5px] border-dashed border-field p-4 text-center"
-              >
-                <div className="mb-0.5 text-[13px] font-semibold text-ink-soft">{role}</div>
-                <div className="text-[11.5px] text-faint">ドラッグ &amp; ドロップ</div>
-                <div className="mt-1.5 text-[10.5px] text-faint">PDF / DOCX / TXT</div>
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-[11.5px] text-muted-2">
-            ※ 文書アップロードは次の実装段階（Slice 2）で有効化します。
-          </p>
-
-          {error && <p className="mt-3 text-[13px] text-error">{error}</p>}
+          {error && <p className="text-[13px] text-error">{error}</p>}
         </div>
 
         <div className="flex justify-end gap-2.5 border-t border-line px-[26px] py-[18px]">
