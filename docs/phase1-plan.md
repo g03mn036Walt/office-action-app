@@ -9,11 +9,12 @@
 ## 現在地
 - [x] Phase 0（基盤）完了 — DB 全テーブル+RLS+Storage、Supabase 3 クライアント、認証（login/callback/signout/requireUser）、Anthropic サーバークライアント、`lib/config/models.ts`、疎通用 `app/api/chat/route.ts`、デザイントークン（`globals.css @theme`）+ Brandmark + login 画面
 - [x] Slice 1 — アプリシェル + 案件 CRUD（削除に確認ダイアログ追加済み）
-- [ ] Slice 2 — ファイルアップロード + Files API（Step1）※2a 基盤+2b UI 配線=実装済み（build/lint 緑）。実アップロード/DB のローカル E2E 検証が残り（完了後に Slice 2 を1 PR でマージ）
-- [ ] Slice 3 — チャット + Step2-3（縦の一本完成）※実装済み（build/lint 緑）。実アップロード→送信→要約の E2E（dev / Supabase MCP）と Vercel デプロイ確認が残り
+- [x] Slice 2 — ファイルアップロード + Files API（Step1）※PR #1（`6c3a058`）で main にマージ済み。Storage キーは日本語名対策で `{uuid}.{ext}`（原名は `file_name` に保持）
+- [ ] Slice 3 — チャット + Step2-3（縦の一本完成）※実装済み・lint 緑、`slice3-chat-step23`（main 起点に cherry-pick）で PR 作成。実アップロード→送信→要約の E2E（dev / Supabase MCP）と Vercel デプロイ確認が残り
 
 ## 進め方の原則（詳細は CLAUDE.md / PRD §14）
 - 1 タスク = 1 つの動く変化。スライス完了ごとに動作確認 → `git commit`。Phase 1 完了で Vercel 確認。
+- ブランチは必ず**最新 main を起点**に切る。古いコミットから分岐すると既マージ済みの作業を退行させる（Slice 3 で実際に発生＝古い `FileUpload.tsx` を含む土台。Slice 3 コミット単独を main へ cherry-pick して復旧）。
 - DB スキーマは Phase 0 で定義済み。変更が要る場合のみ `supabase/migrations/` に追加 → Supabase MCP `apply_migration` で反映 → 同内容をディレクトリにも保存（二重管理）。
 - Next.js 16 は破壊的変更あり。実装前に該当 API を `node_modules/next/dist/docs/` で確認（AGENTS.md）。
 - Server Action / Route Handler は先頭で `requireUser`（`lib/supabase/session.ts`）。API キー・機密本文をクライアント/ログに出さない。
@@ -101,8 +102,8 @@
 
 確認:
 - [ ] アップロード→送信で要約がストリーミング表示、リロードで残る（`messages` / `extracted_text` を MCP 確認）
-- [x] `npm run build` / `npm run lint`（緑）
-- [ ] `git commit` → Vercel 本番（office-action-app.vercel.app）でログイン〜要約まで通し確認
+- [x] `npm run lint`（緑）／ `npm run build`（型チェック緑。ページデータ収集は env 前提）
+- [x] `git commit`（main 起点 `slice3-chat-step23`、PR 作成）／ [ ] Vercel 本番（office-action-app.vercel.app）でログイン〜要約まで通し確認
 
 ---
 
@@ -110,3 +111,8 @@
 - Claude Design 側に各画面（シェル/サイドバー/アップロード/チャット）が handoff 済みか要確認。
 - オートラン停止点の指定 UI（PRD §15 残課題）は Phase 1 では扱わない。
 - docx（Word 生成）は Phase 2 で導入。Phase 1 では入れない。
+
+### Phase 2 申し送り（Slice 3 レビューで検出。機能はするが要改善）
+- **再解析の冪等性なし**: 送信のたびに全文書を再解析し `messages` に user/assistant ペアを毎回 INSERT する。PDF を毎回フル文字起こしするためコスト方針（§7.5＝PDF を毎回送らない）の趣旨に反する。`summary` 未設定の行のみ解析する／既存 Step3 メッセージがあれば追記しない等のガードを入れる。
+- **`maxDuration=60`（`app/api/chat/route.ts`）**: 大きい PDF を逐次処理するため重い案件（複数の大型特許）でタイムアウトの恐れ。Vercel プランに応じて 300 へ引き上げ検討。
+- **構造化出力 × Files API の併用は未実機検証**: `output_config.format`（json_schema）と Files API の document ブロック併用は型/ビルドのみ確認済み。初回の実呼び出しで動作確認（不可なら「概要 stream + 文字起こしを別呼び出し」の 2 呼び出しへフォールバック）。
