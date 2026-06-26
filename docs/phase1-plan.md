@@ -10,7 +10,7 @@
 - [x] Phase 0（基盤）完了 — DB 全テーブル+RLS+Storage、Supabase 3 クライアント、認証（login/callback/signout/requireUser）、Anthropic サーバークライアント、`lib/config/models.ts`、疎通用 `app/api/chat/route.ts`、デザイントークン（`globals.css @theme`）+ Brandmark + login 画面
 - [x] Slice 1 — アプリシェル + 案件 CRUD（削除に確認ダイアログ追加済み）
 - [ ] Slice 2 — ファイルアップロード + Files API（Step1）※2a 基盤+2b UI 配線=実装済み（build/lint 緑）。実アップロード/DB のローカル E2E 検証が残り（完了後に Slice 2 を1 PR でマージ）
-- [ ] Slice 3 — チャット + Step2-3（縦の一本完成）→ Vercel デプロイ確認
+- [ ] Slice 3 — チャット + Step2-3（縦の一本完成）※実装済み（build/lint 緑）。実アップロード→送信→要約の E2E（dev / Supabase MCP）と Vercel デプロイ確認が残り
 
 ## 進め方の原則（詳細は CLAUDE.md / PRD §14）
 - 1 タスク = 1 つの動く変化。スライス完了ごとに動作確認 → `git commit`。Phase 1 完了で Vercel 確認。
@@ -90,17 +90,18 @@
 
 主な新規/変更ファイル:
 - `lib/prompts/step2.ts` … PRD §11-S2 のシステムプロンプト（全文テキスト化＋各文書の概要）。ハードコードせず定数分離
-- `components/ChatMessages.tsx` … messages を時系列表示
-- `components/ChatInput.tsx` … テキスト入力 + 送信、固定配置（PRD §9）
+- `components/app/ChatMessages.tsx` … messages を時系列表示（既存規約に合わせ `components/app/`）
+- `components/app/ChatInput.tsx` … テキスト入力 + 送信、固定配置（PRD §9）
+- `components/app/Chat.tsx` … 送信→`/api/chat` POST→NDJSON 読取の状態管理ラッパ（文書 UI を children に内包）
 - `app/api/chat/route.ts` … 疎通用から本実装へ拡張
-  - コンテキスト組み立て: S2 プロンプト + 文書。PDF は `file_id`（document ブロック）、.docx/.txt/.md は `lib/extract/text.ts` の抽出テキストを本文に含める（PRD §7.3）
-  - `modelForStep(2)` でモデル選択し `stream: true`、サーバー→クライアントへ逐次転送
-  - 完了後（Step3 相当）: 出力から全文テキスト/概要を取り出し `case_files.extracted_text`/`summary` 更新、`messages` に user/assistant 保存、`cases.current_step` 更新
+  - **文書ごとに個別呼び出し**（DOC_ROLES 順）。PDF は `file_id`（document ブロック、`files-api-2025-04-14`）、非PDF は保存済み抽出テキストを本文に含める（PRD §7.3）
+  - `modelForStep(2)`（Sonnet 4.6）+ **構造化出力 `output_config.format`** で `{summary, full_text}` を取得（PDF は streaming/`finalMessage`、非PDF は summary のみ）。進捗は NDJSON で逐次転送
+  - 完了後（Step3 相当）: PDF は `extracted_text`/`summary`、非PDF は `summary` のみ更新（既存抽出は保持）。`messages` に user/assistant 保存、`cases.current_step=3`
 - 「進む」判定は最小実装（次の 1 ステップを進める自由入力）。オートラン（§7.10）は Phase 2
 
 確認:
 - [ ] アップロード→送信で要約がストリーミング表示、リロードで残る（`messages` / `extracted_text` を MCP 確認）
-- [ ] `npm run build` / `npm run lint`
+- [x] `npm run build` / `npm run lint`（緑）
 - [ ] `git commit` → Vercel 本番（office-action-app.vercel.app）でログイン〜要約まで通し確認
 
 ---
