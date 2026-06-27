@@ -11,7 +11,8 @@ import { Bubble, ChatMessages, type ChatMessage } from "./ChatMessages";
  *
  * 文書アップロード UI（server レンダリング）は children として受け取りスクロール領域上部に置く。
  * 送信時に /api/chat へ POST し、NDJSON（doc_start/summary/doc_done/error/done）を逐次読んで
- * 解析の途中状態を表示する。done でサーバーの永続メッセージを取り直し（router.refresh）、楽観表示を破棄する。
+ * 解析の途中状態を表示する。全件成功の done（ok!==false）でのみサーバーの永続メッセージを取り直し
+ * （router.refresh）楽観表示を破棄する。一部失敗（ok===false）では進捗・エラー表示を残し、再送で残りを進める。
  * 永続メッセージは initialMessages prop を直接表示するため、refresh 後は確定値で再描画される。
  */
 
@@ -27,7 +28,7 @@ type ChatEvent =
   | { t: "summary"; fileName: string; text: string }
   | { t: "doc_done"; fileName: string }
   | { t: "error"; fileName?: string; message: string }
-  | { t: "done" };
+  | { t: "done"; ok?: boolean };
 
 export function Chat({
   caseId,
@@ -76,6 +77,9 @@ export function Chat({
         setError(ev.message);
         break;
       case "done":
+        // 一部失敗 / 文書なし（ok===false）は進捗・エラー表示を保持（再送で残りを進める）。
+        // 全件成功時のみ楽観表示を破棄し、サーバーの確定メッセージを取り直す。
+        if (ev.ok === false) break;
         setUserBubble(null);
         setRunDocs([]);
         setError(null);

@@ -10,11 +10,12 @@ import { createClient } from "@/lib/supabase/server";
 /**
  * Step2-3（解析・全文テキスト化・要約）のチャットエンドポイント（Slice 3）。
  *
- * 案件の各 case_files を DOC_ROLES 順に1件ずつ Claude（modelForStep(2)=Sonnet）に渡し、
- * 構造化出力で {summary, full_text} を得る。PDF は Files API の file_id を document ブロックで参照し
- * 全文テキスト化して extracted_text に保存（コスト方針 PRD §7.5 の核心）、非PDF は抽出済みテキストから
- * summary のみ生成する。進捗は NDJSON で逐次クライアントに返し、完了後に user/assistant メッセージを
- * messages に保存し current_step を 3 に更新する。
+ * 案件の case_files のうち summary 未設定の文書だけを並列で Claude（modelForStep(2)=Sonnet）に渡し、
+ * 構造化出力で {summary, full_text} を得る（冪等化: 解析済みは再解析せず既存 summary を流用）。PDF は
+ * Files API の file_id を document ブロックで参照し全文テキスト化して extracted_text に保存（コスト方針
+ * PRD §7.5 の核心）、非PDF は抽出済みテキストから summary のみ生成する。進捗は NDJSON で逐次返し、
+ * 全文書の summary が揃った初回のみ user/assistant メッセージを messages に保存し current_step を 3 に
+ * 更新する（再送では重複保存せず、一部失敗時は保存を保留して再送で残りを埋める）。
  *
  * Anthropic SDK はサーバー/Node 前提（lib/anthropic/client.ts は server-only）。複数 PDF の文字起こしは
  * 既定のサーバーレス時間を超えうるため runtime/maxDuration を明示し、streaming で実時間を抑える（PRD §6）。
@@ -195,7 +196,7 @@ export async function POST(request: NextRequest) {
   // 解析に必要な列のみ取得（DOC_ROLES 順 → role 内は created_at 昇順に並べ替え）。
   const { data: files, error: filesError } = await supabase
     .from("case_files")
-    .select("id, doc_role, file_name, anthropic_file_id, extracted_text, created_at")
+    .select("id, doc_role, file_name, anthropic_file_id, extracted_text, summary, created_at")
     .eq("case_id", caseId);
   if (filesError) {
     return NextResponse.json({ error: "failed to load files" }, { status: 500 });
@@ -214,6 +215,18 @@ export async function POST(request: NextRequest) {
     async start(controller) {
       const send = (obj: unknown) =>
         controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+      // done は ok 付きで一度だけ送って close。ok=false なら一部失敗で再送が必要。
+      let closed = false;
+      const finish = (ok: boolean) => {
+        if (closed) return;
+        closed = true;
+        try {
+          send({ t: "done", ok });
+        } catch {
+          // 既に close 済みなら無視
+        }
+        controller.close();
+      };
 
       try {
         if (orderedFiles.length === 0) {
@@ -222,74 +235,106 @@ export async function POST(request: NextRequest) {
             message:
               "解析する文書がありません。先にファイルをアップロードしてください。",
           });
-          send({ t: "done" });
-          controller.close();
+          finish(false);
           return;
         }
 
-        // assistant チャット用テキスト（見出し＋概要。全文 full_text は含めない）。
-        const chatParts: string[] = [];
+        // 冪等化: summary が既にある文書は再解析しない（既存 summary を流用）。
+        const hasSummary = (f: (typeof orderedFiles)[number]) =>
+          typeof f.summary === "string" && f.summary.trim().length > 0;
+        const toAnalyze = orderedFiles.filter((f) => !hasSummary(f));
 
-        for (const f of orderedFiles) {
+        // 今回新たに解析できた文書の summary（file id -> summary）。
+        const analyzed = new Map<string, string>();
+
+        // 対象全件をまず doc_start（UI が並行で「読み込み中」を表示）。
+        for (const f of toAnalyze) {
           send({ t: "doc_start", fileName: f.file_name, role: f.doc_role });
-          try {
-            let summary: string;
-            if (f.anthropic_file_id) {
-              const r = await analyzePdf(
-                f.anthropic_file_id,
-                f.doc_role as DocRole,
-                f.file_name,
-              );
-              summary = r.summary;
-              const { error } = await supabase
-                .from("case_files")
-                .update({ extracted_text: r.full_text, summary: r.summary })
-                .eq("id", f.id);
-              if (error) throw new Error("解析結果の保存に失敗しました。");
-            } else if (f.extracted_text) {
-              const r = await analyzeNonPdf(
-                f.doc_role as DocRole,
-                f.file_name,
-                f.extracted_text,
-              );
-              summary = r.summary;
-              const { error } = await supabase
-                .from("case_files")
-                .update({ summary: r.summary })
-                .eq("id", f.id);
-              if (error) throw new Error("解析結果の保存に失敗しました。");
-            } else {
-              // file_id も extracted_text も無い（通常 Slice 2 後は起きない防御）。
+        }
+
+        // 並列解析。各タスクは自分でエラーを send し、成功時に summary/doc_done を send。
+        // controller.enqueue は JS シングルスレッドで逐次実行されるため send 競合はない。
+        await Promise.allSettled(
+          toAnalyze.map(async (f) => {
+            try {
+              let summary: string;
+              if (f.anthropic_file_id) {
+                const r = await analyzePdf(
+                  f.anthropic_file_id,
+                  f.doc_role as DocRole,
+                  f.file_name,
+                );
+                summary = r.summary;
+                const { error } = await supabase
+                  .from("case_files")
+                  .update({ extracted_text: r.full_text, summary: r.summary })
+                  .eq("id", f.id);
+                if (error) throw new Error("解析結果の保存に失敗しました。");
+              } else if (f.extracted_text) {
+                const r = await analyzeNonPdf(
+                  f.doc_role as DocRole,
+                  f.file_name,
+                  f.extracted_text,
+                );
+                summary = r.summary;
+                const { error } = await supabase
+                  .from("case_files")
+                  .update({ summary: r.summary })
+                  .eq("id", f.id);
+                if (error) throw new Error("解析結果の保存に失敗しました。");
+              } else {
+                // file_id も extracted_text も無い（通常 Slice 2 後は起きない防御）。
+                throw new Error(
+                  `「${f.file_name}」は解析できる内容がありません。`,
+                );
+              }
+              send({ t: "summary", fileName: f.file_name, text: summary });
+              send({ t: "doc_done", fileName: f.file_name });
+              analyzed.set(f.id, summary);
+            } catch (err) {
+              // 当該文書のみ失敗として記録（他文書は継続。部分進捗は保存済み）。
               send({
                 t: "error",
                 fileName: f.file_name,
-                message: `「${f.file_name}」は解析できる内容がありません。`,
+                message: toUserMessage(err),
               });
-              controller.close();
-              return;
             }
+          }),
+        );
 
-            send({ t: "summary", fileName: f.file_name, text: summary });
-            send({ t: "doc_done", fileName: f.file_name });
-            chatParts.push(`📄 ${f.file_name}\n${summary}`);
-          } catch (err) {
-            // 当該文書で停止。成功済み文書の保存は残す（部分進捗）。
-            // assistant メッセージ・current_step は書かない（再送でやり直せる）。
-            send({
-              t: "error",
-              fileName: f.file_name,
-              message: toUserMessage(err),
-            });
-            controller.close();
-            return;
-          }
+        // 完了判定: 全文書の summary が揃ったか（既存解析済み＋今回分）。
+        const summaryOf = (f: (typeof orderedFiles)[number]) => {
+          const fresh = analyzed.get(f.id);
+          if (fresh) return fresh;
+          return typeof f.summary === "string" ? f.summary.trim() : "";
+        };
+        const allComplete = orderedFiles.every((f) => summaryOf(f).length > 0);
+
+        if (!allComplete) {
+          // 一部失敗: messages / current_step は書かず error カードを残す（再送で残りが進む）。
+          finish(false);
+          return;
         }
 
-        // 全文書成功 → user/assistant メッセージ保存（user → assistant の順）+ current_step。
+        // 冪等化: 既に保存済み（step_no=3 の assistant メッセージあり）なら再保存しない。
+        const { data: saved } = await supabase
+          .from("messages")
+          .select("id")
+          .eq("case_id", caseId)
+          .eq("step_no", 3)
+          .limit(1);
+        if (saved && saved.length > 0) {
+          finish(true);
+          return;
+        }
+
+        // assistant チャット本文（DOC_ROLES 順 = orderedFiles 順。見出し＋概要、全文は含めない）。
+        const assistantContent = orderedFiles
+          .map((f) => `📄 ${f.file_name}\n${summaryOf(f)}`)
+          .join("\n\n");
         const userContent =
           message.trim() ||
           "文書を解析して各文書の全文テキスト化と概要を出力してください。";
-        const assistantContent = chatParts.join("\n\n");
 
         const { error: userErr } = await supabase.from("messages").insert({
           case_id: caseId,
@@ -299,7 +344,7 @@ export async function POST(request: NextRequest) {
         });
         if (userErr) {
           send({ t: "error", message: "メッセージの保存に失敗しました。" });
-          controller.close();
+          finish(false);
           return;
         }
 
@@ -311,21 +356,20 @@ export async function POST(request: NextRequest) {
         });
         if (assistantErr) {
           send({ t: "error", message: "メッセージの保存に失敗しました。" });
-          controller.close();
+          finish(false);
           return;
         }
 
         await supabase.from("cases").update({ current_step: 3 }).eq("id", caseId);
 
-        send({ t: "done" });
-        controller.close();
+        finish(true);
       } catch (err) {
         try {
           send({ t: "error", message: toUserMessage(err) });
         } catch {
           // 既に close 済みなら無視
         }
-        controller.close();
+        finish(false);
       }
     },
   });
