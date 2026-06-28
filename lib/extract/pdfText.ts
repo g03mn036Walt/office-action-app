@@ -45,6 +45,16 @@ function isBadCodePoint(c: number): boolean {
  * 品質OK なら呼び出し側は extracted_text に保存して summary のみ生成、NG なら vision にフォールバックする。
  */
 export async function extractPdfText(blob: Blob): Promise<PdfTextResult> {
+  // pdfjs の legacy build は読込時に DOM グローバル(DOMMatrix/ImageData/Path2D)を参照する。pdfjs 同梱の
+  // Node polyfill は @napi-rs/canvas（ネイティブ依存）から取得するが、Vercel の serverless 関数には同梱
+  // されないため効かず、`ReferenceError: DOMMatrix is not defined` で読込が失敗する（ローカルは canvas が
+  // 入っているため通る）。テキスト抽出では描画しないのでこれらは機能的に不要 → 読込を通すための最小
+  // スタブを import 前に用意する（既に存在すれば尊重）。
+  const g = globalThis as unknown as Record<string, unknown>;
+  if (!g.DOMMatrix) g.DOMMatrix = class {};
+  if (!g.ImageData) g.ImageData = class {};
+  if (!g.Path2D) g.Path2D = class {};
+
   // pdfjs-dist は ESM 専用。動的 import で ESM をネイティブに読み込み、Next の server 出力が CJS でも
   // require(ESM) 失敗を避ける。読込/抽出に失敗してもストリーム内 try で捕捉され、該当文書のみ vision に
   // フォールバックする（ルート全体の 500 にしない）。serverExternalPackages でバンドル対象外。
