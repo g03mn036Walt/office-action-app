@@ -24,7 +24,9 @@ export type ArtifactKind =
 export type DocEvent =
   | { t: "doc_start"; fileName: string; role: string }
   | { t: "summary"; fileName: string; text: string }
-  | { t: "doc_done"; fileName: string };
+  | { t: "doc_done"; fileName: string }
+  /** 中立の案内（エラーではない。2b: 全文テキスト化は完了したが要約を再送に先送り）。 */
+  | { t: "info"; fileName: string; message: string };
 
 /** Step4+ のステップ単位イベント（新規）。 */
 export type StepEvent =
