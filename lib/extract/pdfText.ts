@@ -2,8 +2,6 @@ import "server-only";
 
 import path from "node:path";
 
-import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
-
 /**
  * テキスト層のある PDF をコードで全文抽出する（PRD §7.5 / docs/slice3-step2-plan.md）。
  *
@@ -47,6 +45,10 @@ function isBadCodePoint(c: number): boolean {
  * 品質OK なら呼び出し側は extracted_text に保存して summary のみ生成、NG なら vision にフォールバックする。
  */
 export async function extractPdfText(blob: Blob): Promise<PdfTextResult> {
+  // pdfjs-dist は ESM 専用。動的 import で ESM をネイティブに読み込み、Next の server 出力が CJS でも
+  // require(ESM) 失敗を避ける。読込/抽出に失敗してもストリーム内 try で捕捉され、該当文書のみ vision に
+  // フォールバックする（ルート全体の 500 にしない）。serverExternalPackages でバンドル対象外。
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const data = new Uint8Array(await blob.arrayBuffer());
   const loadingTask = pdfjs.getDocument({
     data,
