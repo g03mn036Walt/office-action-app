@@ -167,3 +167,129 @@ export type ValidityResult = {
   rejections: ValidityRejection[];
   overall: string;
 };
+
+/**
+ * S6 応答方針（PRD §11-S6・最重要）。
+ * 拒絶理由を覆せる範囲で「最も広いクレーム」を狙う。広狭の幅を持つ 3 案以上を、各案の根拠
+ * （Step4 で挙げた審査官の弱点をどう突くか）／権利範囲／リスク／補正の方向性とともに提示する。
+ * ※ 3 案以上・広狭の幅は strict schema では minItems で強制できないため description とプロンプトで担保する。
+ */
+export const STRATEGY_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["strategies", "recommendation", "overall"],
+  properties: {
+    strategies: {
+      type: "array",
+      description:
+        "応答方針の案。広狭の幅を持たせ 3 案以上。最も広い権利範囲を狙う案（breadth=broad）を必ず含める。",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "label",
+          "breadth",
+          "approach",
+          "rationale",
+          "claim_scope",
+          "risks",
+          "amendment_outline",
+        ],
+        properties: {
+          label: { type: "string", description: "案の識別名（例: 案A）" },
+          breadth: {
+            type: "string",
+            enum: ["broad", "medium", "narrow"],
+            description:
+              "狙う権利範囲の広さ。broad=最も広い, medium=中間, narrow=最も狭く確実",
+          },
+          approach: {
+            type: "string",
+            description:
+              "方針の概要（意見書のみで反論／補正で対応／両者の組合せ。何をどう主張するか）",
+          },
+          rationale: {
+            type: "string",
+            description:
+              "拒絶理由を覆せる根拠。Step4 の妥当性評価で挙げた審査官の弱点・誤り（過大解釈／クレーム解釈の誤り／欠落要素／動機付け欠如／阻害要因／後知恵）のどれをどう突くかを具体的に。",
+          },
+          claim_scope: {
+            type: "string",
+            description:
+              "この案で得られる権利範囲（どこまで広く取れるか・どの限定が入るか）",
+          },
+          risks: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "リスク（許可されない可能性／新規事項の懸念／過剰な限定 等）",
+          },
+          amendment_outline: {
+            type: "string",
+            description:
+              "必要な補正の方向性の概要（具体的な補正文は Step8 で作成）。補正不要なら『補正なし（意見書のみ）』と記す。",
+          },
+        },
+      },
+    },
+    recommendation: {
+      type: "object",
+      additionalProperties: false,
+      required: ["recommended_label", "reason"],
+      properties: {
+        recommended_label: {
+          type: "string",
+          description: "推奨する案の label",
+        },
+        reason: {
+          type: "string",
+          description: "推奨理由（許可可能性と権利範囲の広さのバランス）",
+        },
+      },
+    },
+    overall: {
+      type: "string",
+      description: "総評と次ステップ（補正方針）への橋渡し",
+    },
+  },
+};
+
+/**
+ * STRATEGY_SCHEMA に対応する TypeScript 型。
+ * runStrategy の戻り値（パース後）と StrategyView の props で共有する（client/server 両用）。
+ * 構造は STRATEGY_SCHEMA と一致させること（スキーマ変更時は両方更新）。
+ */
+
+/** 狙う権利範囲の広さ。broad=最も広い, medium=中間, narrow=最も狭く確実。 */
+export type StrategyBreadth = "broad" | "medium" | "narrow";
+
+/** 応答方針の 1 案。 */
+export type StrategyOption = {
+  /** 案の識別名（例: "案A"）。 */
+  label: string;
+  breadth: StrategyBreadth;
+  /** 方針の概要（意見書のみ／補正／組合せ）。 */
+  approach: string;
+  /** 拒絶理由を覆せる根拠（審査官の弱点をどう突くか）。 */
+  rationale: string;
+  /** 得られる権利範囲。 */
+  claim_scope: string;
+  /** リスク。 */
+  risks: string[];
+  /** 必要な補正の方向性の概要（具体は Step8）。 */
+  amendment_outline: string;
+};
+
+/** 推奨案とその理由。 */
+export type StrategyRecommendation = {
+  /** 推奨する案の label。 */
+  recommended_label: string;
+  reason: string;
+};
+
+/** S6 応答方針の構造化結果（STRATEGY_SCHEMA のルート）。 */
+export type StrategyResult = {
+  strategies: StrategyOption[];
+  recommendation: StrategyRecommendation;
+  overall: string;
+};
