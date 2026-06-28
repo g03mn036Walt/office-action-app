@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 
+import { Chat } from "@/components/app/Chat";
+import type { ChatMessage } from "@/components/app/ChatMessages";
 import { DeleteFileButton } from "@/components/app/DeleteFileButton";
 import { FileUpload } from "@/components/app/FileUpload";
 import { requireUser } from "@/lib/auth";
@@ -49,6 +51,19 @@ export default async function CasePage({
 
   const title = caseRow.title || caseRow.publication_number || "無題";
 
+  // チャットメッセージ（永続化済み）を時系列で取得。RLS で owner 限定。
+  const { data: messageRows } = await supabase
+    .from("messages")
+    .select("id, role, content, created_at")
+    .eq("case_id", id)
+    .order("created_at", { ascending: true });
+
+  const chatMessages: ChatMessage[] = (messageRows ?? []).map((m) => ({
+    id: m.id,
+    role: m.role,
+    content: m.content,
+  }));
+
   return (
     <div className="flex h-full flex-col">
       {/* ヘッダ */}
@@ -64,9 +79,8 @@ export default async function CasePage({
         </span>
       </div>
 
-      {/* 文書（役割別アップロード）＋チャット */}
-      <div className="flex-1 overflow-y-auto py-7">
-        <div className="mx-auto max-w-[720px] px-6">
+      {/* 文書（役割別アップロード）＋チャット（Slice 3） */}
+      <Chat caseId={id} initialMessages={chatMessages}>
           <section className="space-y-5">
             {DOC_ROLES.map((meta) => {
               const roleFiles = byRole(meta.role);
@@ -110,25 +124,7 @@ export default async function CasePage({
               );
             })}
           </section>
-
-          {/* チャット（Slice 3 で配線） */}
-          <p className="mt-8 text-sm text-muted">
-            この案件のチャットは Step3（要約）実装後に表示されます。まずは文書をアップロードしてください。
-          </p>
-        </div>
-      </div>
-
-      {/* 入力枠（Slice 3 で有効化） */}
-      <div className="shrink-0 border-t border-line bg-surface px-6 py-4">
-        <div className="mx-auto max-w-[720px] rounded-xl border border-field bg-surface p-3.5">
-          <textarea
-            disabled
-            rows={1}
-            placeholder="メッセージを入力…（次の実装段階で有効化）"
-            className="w-full resize-none bg-transparent text-[14.5px] text-ink outline-none placeholder:text-faint"
-          />
-        </div>
-      </div>
+      </Chat>
     </div>
   );
 }
