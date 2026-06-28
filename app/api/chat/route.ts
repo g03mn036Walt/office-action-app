@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import { nextStepToRun, runStep } from "@/lib/steps/dispatch";
 import { toUserMessage } from "@/lib/steps/errors";
 import { runAnalysis } from "@/lib/steps/runAnalysis";
 
@@ -41,10 +42,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "caseId is required" }, { status: 400 });
   }
 
-  // 案件の所有確認（RLS で owner 限定。二重防御）。
+  // 案件の所有確認（RLS で owner 限定。二重防御）。current_step でステップを振り分ける。
   const { data: caseRow } = await supabase
     .from("cases")
-    .select("id")
+    .select("id, current_step")
     .eq("id", caseId)
     .single();
   if (!caseRow) {
@@ -70,7 +71,21 @@ export async function POST(request: NextRequest) {
       };
 
       try {
-        const ok = await runAnalysis(supabase, caseId, message, send);
+        // current_step から次に実行する 1 ステップを決めて振り分ける（最小ディスパッチャ）。
+        const target = nextStepToRun(caseRow.current_step);
+        let ok: boolean;
+        if (target === "analysis") {
+          ok = await runAnalysis(supabase, caseId, message, send);
+        } else if (target === "unsupported") {
+          send({
+            t: "error",
+            message:
+              "このステップはまだ実装されていません（現在は S4 妥当性評価・S6 応答方針まで対応）。",
+          });
+          ok = false;
+        } else {
+          ok = await runStep(supabase, caseId, message, target, send);
+        }
         finish(ok);
       } catch (err) {
         try {
