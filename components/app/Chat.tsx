@@ -20,6 +20,7 @@ type RunDoc = {
   fileName: string;
   status: "reading" | "done" | "error";
   summary?: string;
+  note?: string;
   error?: string;
 };
 
@@ -28,6 +29,7 @@ type ChatEvent =
   | { t: "summary"; fileName: string; text: string }
   | { t: "doc_done"; fileName: string }
   | { t: "error"; fileName?: string; message: string }
+  | { t: "info"; fileName: string; message: string }
   | { t: "done"; ok?: boolean };
 
 export function Chat({
@@ -75,6 +77,16 @@ export function Chat({
           );
         }
         setError(ev.message);
+        break;
+      case "info":
+        // 全文テキスト化は完了したが要約は再送に先送り（中立の案内。エラーではない）。
+        setRunDocs((d) =>
+          d.map((x) =>
+            x.fileName === ev.fileName
+              ? { ...x, status: "done", note: ev.message }
+              : x,
+          ),
+        );
         break;
       case "done":
         // 一部失敗 / 文書なし（ok===false）は進捗・エラー表示を保持（再送で残りを進める）。
@@ -165,6 +177,11 @@ export function Chat({
                         {d.summary && (
                           <div className="mt-0.5 whitespace-pre-wrap break-words">
                             {d.summary}
+                          </div>
+                        )}
+                        {d.note && (
+                          <div className="mt-0.5 text-[13px] text-muted">
+                            {d.note}
                           </div>
                         )}
                         {d.status === "error" && d.error && (
