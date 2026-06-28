@@ -103,6 +103,7 @@
 ### Step1 / Step2 追補（Slice 3 を E2E まで到達）
 - **Step1（`576debf`）**: 再解析の冪等化（`summary` 未設定行のみ解析）＋`Promise.allSettled` 並列化＋完了判定（全件揃った初回のみ `messages` 保存・`step_no=3` 既存なら重複防止）。下の Phase2 申し送り「再解析の冪等性なし」を解消。
 - **Step2: PDFテキスト層抽出ハイブリッド**（設計の正 `docs/slice3-step2-plan.md`）: テキスト層を持つ PDF は `lib/extract/pdfText.ts`（pdfjs-dist v6 legacy + cMap）でコード抽出し Claude には summary のみ生成（`analyzeNonPdf` 合流）、スキャン/文字化けのみ従来 vision（`analyzePdf`）。`app/api/chat/route.ts` は `extracted_text` 優先 → 未抽出 PDF は `storage_path` で download → `extractPdfText`（品質 ok で `extracted_text` 先行保存）。新規 `lib/config/storage.ts`（`CASE_FILES_BUCKET` 集約）、`next.config.ts` に `serverExternalPackages:["pdfjs-dist"]`＋`outputFileTracingIncludes`（cmaps/standard_fonts を `/api/chat` へ同梱）。動機=大型和文 PDF（引用文献2: UniJIS-UCS2-H・33頁）の vision 全文転写が出力トークン爆発で6分・接続切断する問題。E2E で当該文書が vision なし完走、英語スキャン（引用文献1）は vision フォールバックを確認。
+- **Step2b: vision 大部スキャンの1頁分割**（設計の正 `docs/slice3-step2b-plan.md`）: テキスト層なしのスキャンは `lib/extract/pdfSplit.ts`（pdf-lib で1頁ずつ分割）＋`lib/anthropic/visionPdf.ts`（Files API へ並列 upload→`full_text` のみ並列〜32 転写→連結、一時エラーはチャンク単位リトライ）で文字起こしし、`extracted_text` 先行保存→要約は再送1回（ソフト締切 `SUMMARY_DEADLINE_MS`）。`maxDuration=60` 据え置き。dev 実測: 引用文献1（32頁）transcribe ~46s・`extracted_text` 105,191字（単一呼び出し 59,715字の取りこぼしを是正）。
 
 確認:
 - [x] アップロード→送信で要約が表示、リロードで残る（案件111 で dev E2E。`messages`／`extracted_text` を Supabase MCP 確認: 全9文書 summary 完了・user/assistant 各1で重複なし）
@@ -118,5 +119,5 @@
 
 ### Phase 2 申し送り（Slice 3 レビューで検出。機能はするが要改善）
 - ~~**再解析の冪等性なし**~~ → **Slice3 Step1（`576debf`）で解消**: `summary` 未設定行のみ解析・`step_no=3` 既存なら `messages` 追記しない。さらに Step2 で PDF を毎回フル文字起こしせずテキスト層抽出に置換し §7.5 にも整合。
-- **`maxDuration=60`（`app/api/chat/route.ts`）**: Step2 でテキスト層 PDF は download+pdfjs+summary のみで軽くなったが、スキャン大型 PDF が複数 vision に回る案件ではタイムアウトの恐れ。vision 大部のページ分割と併せ 300 への引き上げを 2b/Phase2 で検討。
+- ~~**`maxDuration=60`**~~ → **Step2b（`docs/slice3-step2b-plan.md`）で解消**: スキャン大部 PDF は 1頁ずつ分割して並列転写（実測 ~46s で60s内）＋要約は再送1回。Hobby は 60s 上限で 300 へは上げられないため `maxDuration=60` 据え置き。単一 vision の取りこぼし（密頁の圧縮）も是正。
 - ~~**構造化出力 × Files API の併用は未実機検証**~~ → **E2E 確認済み**: 引用文献1（英語スキャン）が vision 経路（`analyzePdf`=`output_config.format` + Files API document ブロック）で summary/full_text を生成・保存できた。

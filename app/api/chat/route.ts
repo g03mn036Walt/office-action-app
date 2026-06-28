@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getAnthropic } from "@/lib/anthropic/client";
+import { transcribePdfByPages } from "@/lib/anthropic/visionPdf";
 import { DOC_ROLES, labelForRole, type DocRole } from "@/lib/config/docRoles";
 import { modelForStep } from "@/lib/config/models";
 import { CASE_FILES_BUCKET } from "@/lib/config/storage";
@@ -26,19 +27,14 @@ import { createClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const FILES_API_BETA = "files-api-2025-04-14";
+/**
+ * 要約を同一リクエストに入れるかのソフト締切。経過がこれ未満なら inline で要約、超なら再送に先送りする。
+ * 大部スキャンの 1頁分割転写は ~46s を使うため、その場合は要約（~20s）を再送1回に回して maxDuration=60s の
+ * 無言 kill を避ける（小さいスキャンは inline で1回完了。docs/slice3-step2-plan.md §2b）。
+ */
+const SUMMARY_DEADLINE_MS = 35_000;
 
 /** 構造化出力スキーマ（object は additionalProperties:false + required 必須）。 */
-const PDF_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["summary", "full_text"],
-  properties: {
-    summary: { type: "string" },
-    full_text: { type: "string" },
-  },
-};
-
 const SUMMARY_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -88,40 +84,6 @@ function parseAnalysis(
     return { summary, full_text: full };
   }
   return { summary };
-}
-
-/** PDF（file_id）を全文テキスト化 + 概要。streaming + finalMessage で大きい出力に耐える。 */
-async function analyzePdf(
-  fileId: string,
-  role: DocRole,
-  fileName: string,
-): Promise<{ summary: string; full_text: string }> {
-  const final = await getAnthropic()
-    .beta.messages.stream({
-      model: modelForStep(2),
-      max_tokens: 64000,
-      betas: [FILES_API_BETA],
-      system: S2_SYSTEM_PROMPT,
-      output_config: { format: { type: "json_schema", schema: PDF_SCHEMA } },
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "document", source: { type: "file", file_id: fileId } },
-            {
-              type: "text",
-              text: `この文書（${labelForRole(role)}: ${fileName}）について、内容概要(summary)と全文の文字起こし(full_text)を出力してください。スキャンPDFや図中の文字も内容を読み取って文字起こししてください。`,
-            },
-          ],
-        },
-      ],
-    })
-    .finalMessage();
-  guardStop(final.stop_reason);
-  const block = final.content.find((b) => b.type === "text");
-  const raw = block && block.type === "text" ? block.text : null;
-  const parsed = parseAnalysis(raw, true);
-  return { summary: parsed.summary, full_text: parsed.full_text as string };
 }
 
 /** 非PDF（抽出済みテキスト）から概要のみ。全文は既存 extracted_text を保持する。 */
@@ -217,6 +179,8 @@ export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      // maxDuration=60s に対する経過計測（大部スキャンの要約を再送へ先送りするソフト締切に使う）。
+      const startedAt = Date.now();
       const send = (obj: unknown) =>
         controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
       // done は ok 付きで一度だけ送って close。ok=false なら一部失敗で再送が必要。
@@ -309,16 +273,40 @@ export async function POST(request: NextRequest) {
                     .eq("id", f.id);
                   if (error) throw new Error("解析結果の保存に失敗しました。");
                 } else {
-                  // スキャン/文字化け（テキスト層なし）→ 従来どおり vision で文字起こし＋概要。
-                  const r = await analyzePdf(
-                    f.anthropic_file_id,
+                  // スキャン/文字化け（テキスト層なし）→ 1頁ずつ分割して並列 vision 文字起こし（大部でも60s内）。
+                  // download 済み blob を再利用（追加 download なし）。原本 anthropic_file_id は図参照用に保持。
+                  const { full_text } = await transcribePdfByPages(
+                    blob,
                     f.doc_role as DocRole,
                     f.file_name,
+                  );
+                  // ① 連結 full_text を先に保存（冪等の要。要約が落ちても再 transcribe 不要）。
+                  const { error: textError } = await supabase
+                    .from("case_files")
+                    .update({ extracted_text: full_text })
+                    .eq("id", f.id);
+                  if (textError) throw new Error("解析結果の保存に失敗しました。");
+                  // ② ソフト締切: 転写で時間を使った場合、要約は再送1回に先送りして無言 kill を避ける。
+                  // この文書は summary 未設定のまま＝allComplete=false で finish(false)。再送は
+                  // extracted_text あり → analyzeNonPdf 直行（~20s）で軽い。
+                  if (Date.now() - startedAt >= SUMMARY_DEADLINE_MS) {
+                    send({
+                      t: "info",
+                      fileName: f.file_name,
+                      message: `「${f.file_name}」の全文テキスト化が完了しました。もう一度送信すると要約を生成して完了します。`,
+                    });
+                    return;
+                  }
+                  // ③ 余裕があれば（小さいスキャン）そのまま要約まで作って1回で完了。
+                  const r = await analyzeNonPdf(
+                    f.doc_role as DocRole,
+                    f.file_name,
+                    full_text,
                   );
                   summary = r.summary;
                   const { error } = await supabase
                     .from("case_files")
-                    .update({ extracted_text: r.full_text, summary: r.summary })
+                    .update({ summary: r.summary })
                     .eq("id", f.id);
                   if (error) throw new Error("解析結果の保存に失敗しました。");
                 }
