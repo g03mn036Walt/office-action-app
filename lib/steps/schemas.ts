@@ -116,3 +116,54 @@ export const VALIDITY_SCHEMA: Record<string, unknown> = {
     },
   },
 };
+
+/**
+ * VALIDITY_SCHEMA に対応する TypeScript 型。
+ * runValidity の戻り値（パース後）と ValidityChart の props で共有する（client/server 両用）。
+ * 構造は VALIDITY_SCHEMA と一致させること（スキーマ変更時は両方更新）。
+ */
+
+/** 5 段階スコア。5=審査官主張が妥当（開示あり・反論困難）, 1=妥当でない（反論余地大）。 */
+export type ValidityScore = 1 | 2 | 3 | 4 | 5;
+
+/** 構成要件 × 1 引用文献の評価。 */
+export type ValidityAssessment = {
+  /** 引用文献の名称／番号。 */
+  reference: string;
+  score: ValidityScore;
+  /** 根拠（引用文献の実開示と審査官主張の対比。過大解釈・欠落要素の指摘を含む）。 */
+  rationale: string;
+};
+
+/** 請求項を分解した構成要件（文節）。 */
+export type ValidityElement = {
+  /** 構成要件（文節）の記載。 */
+  text: string;
+  /** 各引用文献に対する 5 段階評価。 */
+  assessments: ValidityAssessment[];
+};
+
+/** 請求項単位の構成要件分解＋引用文献照合。 */
+export type ValidityClaim = {
+  /** 請求項番号（例: "1", "2"）。 */
+  claim_no: string;
+  elements: ValidityElement[];
+};
+
+/** 拒絶理由ごとの妥当性と審査官の強い点／弱い点。 */
+export type ValidityRejection = {
+  /** 拒絶理由の種類（新規性／進歩性／記載要件／特許適格性／MPF 等）。 */
+  type: string;
+  target_claims: string[];
+  examiner_strong_points: string[];
+  /** 弱点（過大解釈／クレーム解釈の誤り／欠落要素／動機付け欠如／阻害要因／後知恵 等）。 */
+  examiner_weak_points: string[];
+  notes: string;
+};
+
+/** Step4-S5 妥当性評価の構造化結果（VALIDITY_SCHEMA のルート）。 */
+export type ValidityResult = {
+  claims: ValidityClaim[];
+  rejections: ValidityRejection[];
+  overall: string;
+};
