@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { deleteFile as deleteAnthropicFile, uploadPdf } from "@/lib/anthropic/files";
 import { requireUser } from "@/lib/auth";
 import { type DocRole, extensionOf, isSingleRole } from "@/lib/config/docRoles";
+import { CASE_FILES_BUCKET } from "@/lib/config/storage";
 import { extractText } from "@/lib/extract/text";
 
 /**
@@ -16,9 +17,6 @@ import { extractText } from "@/lib/extract/text";
  * 注意: createCase は redirect せず新 ID を返す。呼び出し側（Client）が
  * router.push で遷移する（Server Action 内 redirect の try/catch 落とし穴回避）。
  */
-
-/** アップロード文書を置く Storage バケット（migration 0003、path = {user_id}/{case_id}/{uuid}.{ext}）。 */
-const CASE_FILES_BUCKET = "case-files";
 
 export type CreateCaseInput = {
   publicationNumber: string;

@@ -10,7 +10,7 @@
 - [x] Phase 0（基盤）完了 — DB 全テーブル+RLS+Storage、Supabase 3 クライアント、認証（login/callback/signout/requireUser）、Anthropic サーバークライアント、`lib/config/models.ts`、疎通用 `app/api/chat/route.ts`、デザイントークン（`globals.css @theme`）+ Brandmark + login 画面
 - [x] Slice 1 — アプリシェル + 案件 CRUD（削除に確認ダイアログ追加済み）
 - [x] Slice 2 — ファイルアップロード + Files API（Step1）※PR #1（`6c3a058`）で main にマージ済み。Storage キーは日本語名対策で `{uuid}.{ext}`（原名は `file_name` に保持）
-- [ ] Slice 3 — チャット + Step2-3（縦の一本完成）※実装済み・lint 緑、`slice3-chat-step23`（main 起点に cherry-pick）で PR 作成。実アップロード→送信→要約の E2E（dev / Supabase MCP）と Vercel デプロイ確認が残り
+- [x] Slice 3 — チャット + Step2-3（縦の一本完成）。Step1=冪等化・並列化・完了判定（`576debf`）／Step2=PDFテキスト層抽出ハイブリッド。dev E2E（案件111・Supabase MCP）PASS。`slice3-chat-step23` 上。**残=Vercel デプロイ確認・main マージ**
 
 ## 進め方の原則（詳細は CLAUDE.md / PRD §14）
 - 1 タスク = 1 つの動く変化。スライス完了ごとに動作確認 → `git commit`。Phase 1 完了で Vercel 確認。
@@ -100,8 +100,12 @@
   - 完了後（Step3 相当）: PDF は `extracted_text`/`summary`、非PDF は `summary` のみ更新（既存抽出は保持）。`messages` に user/assistant 保存、`cases.current_step=3`
 - 「進む」判定は最小実装（次の 1 ステップを進める自由入力）。オートラン（§7.10）は Phase 2
 
+### Step1 / Step2 追補（Slice 3 を E2E まで到達）
+- **Step1（`576debf`）**: 再解析の冪等化（`summary` 未設定行のみ解析）＋`Promise.allSettled` 並列化＋完了判定（全件揃った初回のみ `messages` 保存・`step_no=3` 既存なら重複防止）。下の Phase2 申し送り「再解析の冪等性なし」を解消。
+- **Step2: PDFテキスト層抽出ハイブリッド**（設計の正 `docs/slice3-step2-plan.md`）: テキスト層を持つ PDF は `lib/extract/pdfText.ts`（pdfjs-dist v6 legacy + cMap）でコード抽出し Claude には summary のみ生成（`analyzeNonPdf` 合流）、スキャン/文字化けのみ従来 vision（`analyzePdf`）。`app/api/chat/route.ts` は `extracted_text` 優先 → 未抽出 PDF は `storage_path` で download → `extractPdfText`（品質 ok で `extracted_text` 先行保存）。新規 `lib/config/storage.ts`（`CASE_FILES_BUCKET` 集約）、`next.config.ts` に `serverExternalPackages:["pdfjs-dist"]`＋`outputFileTracingIncludes`（cmaps/standard_fonts を `/api/chat` へ同梱）。動機=大型和文 PDF（引用文献2: UniJIS-UCS2-H・33頁）の vision 全文転写が出力トークン爆発で6分・接続切断する問題。E2E で当該文書が vision なし完走、英語スキャン（引用文献1）は vision フォールバックを確認。
+
 確認:
-- [ ] アップロード→送信で要約がストリーミング表示、リロードで残る（`messages` / `extracted_text` を MCP 確認）
+- [x] アップロード→送信で要約が表示、リロードで残る（案件111 で dev E2E。`messages`／`extracted_text` を Supabase MCP 確認: 全9文書 summary 完了・user/assistant 各1で重複なし）
 - [x] `npm run lint`（緑）／ `npm run build`（型チェック緑。ページデータ収集は env 前提）
 - [x] `git commit`（main 起点 `slice3-chat-step23`、PR 作成）／ [ ] Vercel 本番（office-action-app.vercel.app）でログイン〜要約まで通し確認
 
@@ -113,6 +117,6 @@
 - docx（Word 生成）は Phase 2 で導入。Phase 1 では入れない。
 
 ### Phase 2 申し送り（Slice 3 レビューで検出。機能はするが要改善）
-- **再解析の冪等性なし**: 送信のたびに全文書を再解析し `messages` に user/assistant ペアを毎回 INSERT する。PDF を毎回フル文字起こしするためコスト方針（§7.5＝PDF を毎回送らない）の趣旨に反する。`summary` 未設定の行のみ解析する／既存 Step3 メッセージがあれば追記しない等のガードを入れる。
-- **`maxDuration=60`（`app/api/chat/route.ts`）**: 大きい PDF を逐次処理するため重い案件（複数の大型特許）でタイムアウトの恐れ。Vercel プランに応じて 300 へ引き上げ検討。
-- **構造化出力 × Files API の併用は未実機検証**: `output_config.format`（json_schema）と Files API の document ブロック併用は型/ビルドのみ確認済み。初回の実呼び出しで動作確認（不可なら「概要 stream + 文字起こしを別呼び出し」の 2 呼び出しへフォールバック）。
+- ~~**再解析の冪等性なし**~~ → **Slice3 Step1（`576debf`）で解消**: `summary` 未設定行のみ解析・`step_no=3` 既存なら `messages` 追記しない。さらに Step2 で PDF を毎回フル文字起こしせずテキスト層抽出に置換し §7.5 にも整合。
+- **`maxDuration=60`（`app/api/chat/route.ts`）**: Step2 でテキスト層 PDF は download+pdfjs+summary のみで軽くなったが、スキャン大型 PDF が複数 vision に回る案件ではタイムアウトの恐れ。vision 大部のページ分割と併せ 300 への引き上げを 2b/Phase2 で検討。
+- ~~**構造化出力 × Files API の併用は未実機検証**~~ → **E2E 確認済み**: 引用文献1（英語スキャン）が vision 経路（`analyzePdf`=`output_config.format` + Files API document ブロック）で summary/full_text を生成・保存できた。

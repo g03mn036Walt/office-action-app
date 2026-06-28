@@ -4,6 +4,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getAnthropic } from "@/lib/anthropic/client";
 import { DOC_ROLES, labelForRole, type DocRole } from "@/lib/config/docRoles";
 import { modelForStep } from "@/lib/config/models";
+import { CASE_FILES_BUCKET } from "@/lib/config/storage";
+import { extractPdfText } from "@/lib/extract/pdfText";
 import { S2_SYSTEM_PROMPT } from "@/lib/prompts/step2";
 import { createClient } from "@/lib/supabase/server";
 
@@ -196,7 +198,9 @@ export async function POST(request: NextRequest) {
   // 解析に必要な列のみ取得（DOC_ROLES 順 → role 内は created_at 昇順に並べ替え）。
   const { data: files, error: filesError } = await supabase
     .from("case_files")
-    .select("id, doc_role, file_name, anthropic_file_id, extracted_text, summary, created_at")
+    .select(
+      "id, doc_role, file_name, anthropic_file_id, storage_path, extracted_text, summary, created_at",
+    )
     .eq("case_id", caseId);
   if (filesError) {
     return NextResponse.json({ error: "failed to load files" }, { status: 500 });
@@ -258,19 +262,9 @@ export async function POST(request: NextRequest) {
           toAnalyze.map(async (f) => {
             try {
               let summary: string;
-              if (f.anthropic_file_id) {
-                const r = await analyzePdf(
-                  f.anthropic_file_id,
-                  f.doc_role as DocRole,
-                  f.file_name,
-                );
-                summary = r.summary;
-                const { error } = await supabase
-                  .from("case_files")
-                  .update({ extracted_text: r.full_text, summary: r.summary })
-                  .eq("id", f.id);
-                if (error) throw new Error("解析結果の保存に失敗しました。");
-              } else if (f.extracted_text) {
+              if (f.extracted_text) {
+                // 既に抽出済み（非PDF、またはテキスト層抽出済みで summary だけ未生成）→ summary のみ。
+                // 【冪等・再 download 不要。PDF も抽出後はここに合流する】
                 const r = await analyzeNonPdf(
                   f.doc_role as DocRole,
                   f.file_name,
@@ -282,6 +276,52 @@ export async function POST(request: NextRequest) {
                   .update({ summary: r.summary })
                   .eq("id", f.id);
                 if (error) throw new Error("解析結果の保存に失敗しました。");
+              } else if (f.anthropic_file_id) {
+                // 未抽出 PDF。まずコードでテキスト層抽出を試し、取れれば vision を使わず summary のみ生成する
+                // （PDF を Claude に送らない＝コスト方針 PRD §7.5）。スキャン/文字化けのみ従来 vision に残す。
+                if (!f.storage_path) {
+                  throw new Error(`「${f.file_name}」の保存場所が見つかりません。`);
+                }
+                const { data: blob, error: dlError } = await supabase.storage
+                  .from(CASE_FILES_BUCKET)
+                  .download(f.storage_path);
+                if (dlError || !blob) {
+                  throw new Error("文書の取得に失敗しました。");
+                }
+                const extracted = await extractPdfText(blob);
+                if (extracted.ok) {
+                  // テキスト層あり: extracted_text を先に保存（summary 生成が落ちても次回 download+pdfjs を
+                  // スキップでき冪等性が一段強い）→ その後 summary のみ生成。
+                  const { error: textError } = await supabase
+                    .from("case_files")
+                    .update({ extracted_text: extracted.text })
+                    .eq("id", f.id);
+                  if (textError) throw new Error("解析結果の保存に失敗しました。");
+                  const r = await analyzeNonPdf(
+                    f.doc_role as DocRole,
+                    f.file_name,
+                    extracted.text,
+                  );
+                  summary = r.summary;
+                  const { error } = await supabase
+                    .from("case_files")
+                    .update({ summary: r.summary })
+                    .eq("id", f.id);
+                  if (error) throw new Error("解析結果の保存に失敗しました。");
+                } else {
+                  // スキャン/文字化け（テキスト層なし）→ 従来どおり vision で文字起こし＋概要。
+                  const r = await analyzePdf(
+                    f.anthropic_file_id,
+                    f.doc_role as DocRole,
+                    f.file_name,
+                  );
+                  summary = r.summary;
+                  const { error } = await supabase
+                    .from("case_files")
+                    .update({ extracted_text: r.full_text, summary: r.summary })
+                    .eq("id", f.id);
+                  if (error) throw new Error("解析結果の保存に失敗しました。");
+                }
               } else {
                 // file_id も extracted_text も無い（通常 Slice 2 後は起きない防御）。
                 throw new Error(
