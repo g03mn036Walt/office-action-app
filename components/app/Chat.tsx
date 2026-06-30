@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import type { ArtifactKind, ChatEvent } from "@/lib/chat/events";
 import type {
+  DocxDeliverResult,
   FullAmendmentResult,
   OpinionResult,
   RepAmendmentResult,
@@ -14,6 +15,7 @@ import type {
 
 import { ChatInput } from "./ChatInput";
 import { Bubble, ChatMessages, type ChatMessage } from "./ChatMessages";
+import { DocxView } from "./DocxView";
 import { FullAmendmentView } from "./FullAmendmentView";
 import { OpinionView } from "./OpinionView";
 import { RepAmendmentView } from "./RepAmendmentView";
@@ -70,6 +72,8 @@ function StepArtifact({
       );
     case "opinion":
       return <OpinionView result={artifact.payload as OpinionResult} />;
+    case "docx":
+      return <DocxView result={artifact.payload as DocxDeliverResult} />;
     default:
       return null;
   }

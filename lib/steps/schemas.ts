@@ -626,3 +626,107 @@ export type OpinionResult = {
   conclusion: string;
   overall: string;
 };
+
+/**
+ * S14 書面出力（PRD §11-S14 / §7.7）。
+ * 補正書・意見書・見解書の「構造化テキスト」（見出し・本文）を出力させる。Claude にバイナリ(.docx)を
+ * 作らせず、アプリ側（lib/docx/build.ts）が docx で実ファイルを生成する（ガードレール6）。
+ * 補正書・意見書は各国フォーマット、見解書は本願/OA/引用文献概要・妥当性・複数方針・最終方針を含める。
+ */
+export const DOCX_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["country", "documents", "overall"],
+  properties: {
+    country: {
+      type: "string",
+      description: "対象国（JP/US/EP/WO/CN）。補正書・意見書のフォーマットの基準。",
+    },
+    documents: {
+      type: "array",
+      description: "出力する書面（補正書・意見書・見解書）",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["doc_kind", "title", "sections"],
+        properties: {
+          doc_kind: {
+            type: "string",
+            enum: ["amendment", "opinion", "view"],
+            description: "amendment=補正書, opinion=意見書, view=見解書",
+          },
+          title: {
+            type: "string",
+            description: "書面のタイトル（対象国の慣行に合わせる）",
+          },
+          sections: {
+            type: "array",
+            description: "書面を構成する節（見出し＋本文）",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["heading", "body"],
+              properties: {
+                heading: { type: "string", description: "節の見出し" },
+                body: {
+                  type: "string",
+                  description: "節の本文（段落は改行で区切る）",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    overall: {
+      type: "string",
+      description: "生成した書面の要約（何をどう作成したか）",
+    },
+  },
+};
+
+/** 書面の種別。amendment=補正書, opinion=意見書, view=見解書。 */
+export type DocxDocKind = "amendment" | "opinion" | "view";
+
+/** 書面の 1 節（見出し＋本文）。 */
+export type DocxSection = {
+  /** 節の見出し。 */
+  heading: string;
+  /** 節の本文（段落は改行区切り）。 */
+  body: string;
+};
+
+/** 1 書面の構造化テキスト（DOCX_SCHEMA の documents 要素）。 */
+export type DocxDocument = {
+  doc_kind: DocxDocKind;
+  /** 書面のタイトル。 */
+  title: string;
+  sections: DocxSection[];
+};
+
+/** S14 書面出力（LLM 構造化テキスト。DOCX_SCHEMA のルート）。run* の戻り値。 */
+export type DocxResult = {
+  /** 対象国（JP/US/EP/WO/CN）。 */
+  country: string;
+  documents: DocxDocument[];
+  overall: string;
+};
+
+/**
+ * dispatch 層が生成物（Storage パス・署名 URL）を付与した配信用ドキュメント。
+ * download_url は失効する署名 URL のため DB には保存しない（保存時は空文字。storage_path のみ残す）。
+ */
+export type DocxDownloadDocument = DocxDocument & {
+  /** Storage 上のパス（{user_id}/{case_id}/generated/...）。 */
+  storage_path: string;
+  /** ダウンロード用署名 URL（失効あり）。 */
+  download_url: string;
+};
+
+/** artifact(kind=docx) の payload。DocxResult に DL 情報を付与したもの（DocxView の props）。 */
+export type DocxDeliverResult = {
+  /** 対象国（JP/US/EP/WO/CN）。 */
+  country: string;
+  documents: DocxDownloadDocument[];
+  overall: string;
+};

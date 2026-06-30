@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
           send({
             t: "error",
             message:
-              "このステップはまだ実装されていません（現在は S4 妥当性評価・S6 応答方針まで対応）。",
+              "検討フローは Step14（書面出力）まで完了しています。追加の対応はまだ実装されていません。",
           });
           ok = false;
         } else {
