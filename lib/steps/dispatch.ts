@@ -255,7 +255,9 @@ async function runDocxAndPersist(
       }
       const { data: signed } = await supabase.storage
         .from(CASE_FILES_BUCKET)
-        .createSignedUrl(storagePath, 3600);
+        // download=ファイル名で Content-Disposition: attachment を強制（署名 URL は別オリジンのため
+        // HTML の download 属性が効かない。日本語ファイル名で確実に DL させる）。
+        .createSignedUrl(storagePath, 3600, { download: file.fileName });
       documents.push({
         ...src,
         storage_path: storagePath,
