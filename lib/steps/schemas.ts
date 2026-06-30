@@ -455,3 +455,90 @@ export type RepAmendmentResult = {
   recommendation: StrategyRecommendation;
   overall: string;
 };
+
+/**
+ * S10 全文クレーム補正（PRD §11-S10）。
+ * 代表補正案に基づき全クレームを補正する。S8 の原則（必要最小限）を全クレームに適用し、各クレームを
+ * segment 列でハイライト可能にする。補正後の全請求項を漏れなく含める。
+ */
+export const FULL_AMENDMENT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["country", "claims", "summary_of_changes", "addressed_rejections", "overall"],
+  properties: {
+    country: {
+      type: "string",
+      description: "対象国（JP/US/EP/WO/CN）。補正運用ルールの基準。",
+    },
+    claims: {
+      type: "array",
+      description: "補正後の全クレーム（補正の有無に関わらず全請求項を含める）",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["claim_no", "claim_type", "depends_on", "segments", "basis"],
+        properties: {
+          claim_no: { type: "string", description: "請求項番号" },
+          claim_type: {
+            type: "string",
+            enum: ["independent", "dependent"],
+            description: "independent=独立項, dependent=従属項",
+          },
+          depends_on: {
+            type: "string",
+            description: "従属項の従属先（例: 請求項1）。独立項は空文字。",
+          },
+          segments: {
+            type: "array",
+            description: "補正後クレーム（文節列。change で補正箇所を区別）",
+            items: AMENDMENT_SEGMENT_SCHEMA,
+          },
+          basis: {
+            type: "string",
+            description:
+              "補正が新規事項でない根拠（明細書の対応箇所）。補正なしの場合は据置である旨。",
+          },
+        },
+      },
+    },
+    summary_of_changes: {
+      type: "string",
+      description: "補正の要点（どのクレームをどう補正したかの概要）",
+    },
+    addressed_rejections: {
+      type: "array",
+      items: { type: "string" },
+      description: "この全文補正で解消する拒絶理由",
+    },
+    overall: {
+      type: "string",
+      description: "総評と次ステップ（意見書）への橋渡し",
+    },
+  },
+};
+
+/** 補正後の 1 クレーム（独立項／従属項。segment 列でハイライト）。 */
+export type AmendedClaim = {
+  /** 請求項番号。 */
+  claim_no: string;
+  /** 独立項か従属項か。 */
+  claim_type: "independent" | "dependent";
+  /** 従属項の従属先（独立項は空文字）。 */
+  depends_on: string;
+  /** 補正後クレーム（文節列）。 */
+  segments: AmendmentSegment[];
+  /** 新規事項でない根拠（明細書の対応箇所）。 */
+  basis: string;
+};
+
+/** S10 全文クレーム補正の構造化結果（FULL_AMENDMENT_SCHEMA のルート）。 */
+export type FullAmendmentResult = {
+  /** 対象国（JP/US/EP/WO/CN）。 */
+  country: string;
+  claims: AmendedClaim[];
+  /** 補正の要点。 */
+  summary_of_changes: string;
+  /** 解消する拒絶理由。 */
+  addressed_rejections: string[];
+  overall: string;
+};
