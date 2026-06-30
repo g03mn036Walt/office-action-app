@@ -293,3 +293,450 @@ export type StrategyResult = {
   recommendation: StrategyRecommendation;
   overall: string;
 };
+
+/**
+ * 補正後クレームを文節（segment）の列で表す 1 要素（PRD §9.4 の補正箇所ハイライトの素）。
+ * change で keep（据置）/ add（追記）/ delete（削除）を区別する。S8 代表補正・S10 全文補正で共有。
+ */
+const AMENDMENT_SEGMENT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["text", "change"],
+  properties: {
+    text: { type: "string", description: "文節（クレームの一部の記載）" },
+    change: {
+      type: "string",
+      enum: ["keep", "add", "delete"],
+      description:
+        "keep=現クレームから据置, add=補正で追記, delete=補正で削除。追記・削除は独立した segment に分ける。",
+    },
+  },
+};
+
+/**
+ * S8 代表クレーム補正（PRD §11-S8・重要）。
+ * 拒絶理由解消に必要最小限の補正のみ。代表請求項を対象に、補正後クレームを segment 列で表し
+ * 追記/削除をハイライト可能にする。可能なら広狭の異なる最小限の 3 案を比較する。
+ * ※ 3 案・広狭の幅は strict schema では minItems で強制できないため description とプロンプトで担保する。
+ */
+export const REP_AMENDMENT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["country", "representative_claim_no", "options", "recommendation", "overall"],
+  properties: {
+    country: {
+      type: "string",
+      description: "対象国（JP/US/EP/WO/CN）。補正運用ルールの基準。",
+    },
+    representative_claim_no: {
+      type: "string",
+      description: "代表として補正する請求項番号（通常は独立請求項）",
+    },
+    options: {
+      type: "array",
+      description:
+        "最小限度の異なる補正案。可能なら広狭の幅を持たせた 3 案。各案は必要最小限の補正に徹する。",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "label",
+          "breadth",
+          "segments",
+          "basis",
+          "addressed_rejections",
+          "claim_scope",
+          "rationale",
+          "risks",
+        ],
+        properties: {
+          label: { type: "string", description: "案の識別名（例: 案A）" },
+          breadth: {
+            type: "string",
+            enum: ["broad", "medium", "narrow"],
+            description:
+              "得られる権利範囲の広さ。broad=最も広い, medium=中間, narrow=最も狭く確実",
+          },
+          segments: {
+            type: "array",
+            description: "補正後の代表請求項（文節列。change で補正箇所を区別）",
+            items: AMENDMENT_SEGMENT_SCHEMA,
+          },
+          basis: {
+            type: "string",
+            description: "新規事項でない根拠（本願明細書の対応箇所・段落番号等）",
+          },
+          addressed_rejections: {
+            type: "array",
+            items: { type: "string" },
+            description: "この案が解消する拒絶理由",
+          },
+          claim_scope: {
+            type: "string",
+            description: "この案で得られる権利範囲（どこまで広く取れるか・どの限定が入るか）",
+          },
+          rationale: {
+            type: "string",
+            description:
+              "なぜこの補正で拒絶理由を覆せるか（Step4/Step6 で押さえた審査官の弱点との対応）",
+          },
+          risks: {
+            type: "array",
+            items: { type: "string" },
+            description: "リスク（過剰な限定／新規事項の懸念／許可されない可能性 等）",
+          },
+        },
+      },
+    },
+    recommendation: {
+      type: "object",
+      additionalProperties: false,
+      required: ["recommended_label", "reason"],
+      properties: {
+        recommended_label: {
+          type: "string",
+          description: "推奨する案の label",
+        },
+        reason: {
+          type: "string",
+          description: "推奨理由（解消の確実性と権利範囲の広さのバランス）",
+        },
+      },
+    },
+    overall: {
+      type: "string",
+      description: "総評と次ステップ（全文補正）への橋渡し",
+    },
+  },
+};
+
+/**
+ * REP_AMENDMENT_SCHEMA / FULL_AMENDMENT_SCHEMA に対応する TypeScript 型。
+ * run* の戻り値（パース後）と各 View の props で共有する（client/server 両用）。
+ * 構造はスキーマと一致させること（スキーマ変更時は両方更新）。
+ */
+
+/** 補正の種別。keep=据置, add=追記, delete=削除。 */
+export type AmendmentChange = "keep" | "add" | "delete";
+
+/** 補正後クレームの 1 文節（change で補正箇所を区別＝ハイライトの素）。 */
+export type AmendmentSegment = {
+  /** 文節（クレームの一部の記載）。 */
+  text: string;
+  change: AmendmentChange;
+};
+
+/** 代表補正の 1 案（広狭の幅を持つ。必要最小限の補正）。 */
+export type AmendmentOption = {
+  /** 案の識別名（例: "案A"）。 */
+  label: string;
+  breadth: StrategyBreadth;
+  /** 補正後の代表請求項（文節列）。 */
+  segments: AmendmentSegment[];
+  /** 新規事項でない根拠（明細書の対応箇所）。 */
+  basis: string;
+  /** この案が解消する拒絶理由。 */
+  addressed_rejections: string[];
+  /** 得られる権利範囲。 */
+  claim_scope: string;
+  /** 拒絶理由を覆せる根拠（審査官の弱点との対応）。 */
+  rationale: string;
+  /** リスク。 */
+  risks: string[];
+};
+
+/** S8 代表クレーム補正の構造化結果（REP_AMENDMENT_SCHEMA のルート）。 */
+export type RepAmendmentResult = {
+  /** 対象国（JP/US/EP/WO/CN）。 */
+  country: string;
+  /** 代表として補正する請求項番号。 */
+  representative_claim_no: string;
+  options: AmendmentOption[];
+  recommendation: StrategyRecommendation;
+  overall: string;
+};
+
+/**
+ * S10 全文クレーム補正（PRD §11-S10）。
+ * 代表補正案に基づき全クレームを補正する。S8 の原則（必要最小限）を全クレームに適用し、各クレームを
+ * segment 列でハイライト可能にする。補正後の全請求項を漏れなく含める。
+ */
+export const FULL_AMENDMENT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["country", "claims", "summary_of_changes", "addressed_rejections", "overall"],
+  properties: {
+    country: {
+      type: "string",
+      description: "対象国（JP/US/EP/WO/CN）。補正運用ルールの基準。",
+    },
+    claims: {
+      type: "array",
+      description: "補正後の全クレーム（補正の有無に関わらず全請求項を含める）",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["claim_no", "claim_type", "depends_on", "segments", "basis"],
+        properties: {
+          claim_no: { type: "string", description: "請求項番号" },
+          claim_type: {
+            type: "string",
+            enum: ["independent", "dependent"],
+            description: "independent=独立項, dependent=従属項",
+          },
+          depends_on: {
+            type: "string",
+            description: "従属項の従属先（例: 請求項1）。独立項は空文字。",
+          },
+          segments: {
+            type: "array",
+            description: "補正後クレーム（文節列。change で補正箇所を区別）",
+            items: AMENDMENT_SEGMENT_SCHEMA,
+          },
+          basis: {
+            type: "string",
+            description:
+              "補正が新規事項でない根拠（明細書の対応箇所）。補正なしの場合は据置である旨。",
+          },
+        },
+      },
+    },
+    summary_of_changes: {
+      type: "string",
+      description: "補正の要点（どのクレームをどう補正したかの概要）",
+    },
+    addressed_rejections: {
+      type: "array",
+      items: { type: "string" },
+      description: "この全文補正で解消する拒絶理由",
+    },
+    overall: {
+      type: "string",
+      description: "総評と次ステップ（意見書）への橋渡し",
+    },
+  },
+};
+
+/** 補正後の 1 クレーム（独立項／従属項。segment 列でハイライト）。 */
+export type AmendedClaim = {
+  /** 請求項番号。 */
+  claim_no: string;
+  /** 独立項か従属項か。 */
+  claim_type: "independent" | "dependent";
+  /** 従属項の従属先（独立項は空文字）。 */
+  depends_on: string;
+  /** 補正後クレーム（文節列）。 */
+  segments: AmendmentSegment[];
+  /** 新規事項でない根拠（明細書の対応箇所）。 */
+  basis: string;
+};
+
+/** S10 全文クレーム補正の構造化結果（FULL_AMENDMENT_SCHEMA のルート）。 */
+export type FullAmendmentResult = {
+  /** 対象国（JP/US/EP/WO/CN）。 */
+  country: string;
+  claims: AmendedClaim[];
+  /** 補正の要点。 */
+  summary_of_changes: string;
+  /** 解消する拒絶理由。 */
+  addressed_rejections: string[];
+  overall: string;
+};
+
+/**
+ * S12 意見書（PRD §11-S12）。
+ * 全文補正案に基づく拒絶理由ごとの反論。できる限り明細書記載から抜粋して主張し、エストッペル
+ * （包袋禁反言）で制限がかからない主張にする。全ての拒絶理由に対応する。
+ */
+export const OPINION_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["country", "introduction", "arguments", "conclusion", "overall"],
+  properties: {
+    country: {
+      type: "string",
+      description: "対象国（JP/US/EP/WO/CN）。意見書の作法の基準。",
+    },
+    introduction: {
+      type: "string",
+      description: "前置き（補正の概要・全体としての主張の骨子）",
+    },
+    arguments: {
+      type: "array",
+      description: "拒絶理由ごとの反論（全ての拒絶理由を対象にする）",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["rejection", "argument", "spec_basis", "estoppel_note"],
+        properties: {
+          rejection: {
+            type: "string",
+            description: "対象の拒絶理由（種類・対象請求項）",
+          },
+          argument: {
+            type: "string",
+            description:
+              "反論の主張（補正による解消／意見による反論。審査官の弱点をどう突くか）",
+          },
+          spec_basis: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "主張の根拠となる本願明細書の記載（抜粋・段落番号等）。エストッペル配慮で明細書記載を主体にする。",
+          },
+          estoppel_note: {
+            type: "string",
+            description:
+              "エストッペル配慮の補足（不利な限定解釈を避けるための留意点。特になければその旨）",
+          },
+        },
+      },
+    },
+    conclusion: {
+      type: "string",
+      description: "むすび（全拒絶理由が解消され特許査定が相当である旨）",
+    },
+    overall: {
+      type: "string",
+      description: "総評と次ステップ（書面出力）への橋渡し",
+    },
+  },
+};
+
+/** 意見書の 1 反論（拒絶理由単位）。 */
+export type OpinionArgument = {
+  /** 対象の拒絶理由（種類・対象請求項）。 */
+  rejection: string;
+  /** 反論の主張。 */
+  argument: string;
+  /** 主張の根拠となる明細書記載（抜粋・段落番号等）。 */
+  spec_basis: string[];
+  /** エストッペル配慮の補足。 */
+  estoppel_note: string;
+};
+
+/** S12 意見書の構造化結果（OPINION_SCHEMA のルート）。 */
+export type OpinionResult = {
+  /** 対象国（JP/US/EP/WO/CN）。 */
+  country: string;
+  /** 前置き（補正の概要・主張の骨子）。 */
+  introduction: string;
+  arguments: OpinionArgument[];
+  /** むすび。 */
+  conclusion: string;
+  overall: string;
+};
+
+/**
+ * S14 書面出力（PRD §11-S14 / §7.7）。
+ * 補正書・意見書・見解書の「構造化テキスト」（見出し・本文）を出力させる。Claude にバイナリ(.docx)を
+ * 作らせず、アプリ側（lib/docx/build.ts）が docx で実ファイルを生成する（ガードレール6）。
+ * 補正書・意見書は各国フォーマット、見解書は本願/OA/引用文献概要・妥当性・複数方針・最終方針を含める。
+ */
+export const DOCX_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["country", "documents", "overall"],
+  properties: {
+    country: {
+      type: "string",
+      description: "対象国（JP/US/EP/WO/CN）。補正書・意見書のフォーマットの基準。",
+    },
+    documents: {
+      type: "array",
+      description: "出力する書面（補正書・意見書・見解書）",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["doc_kind", "title", "sections"],
+        properties: {
+          doc_kind: {
+            type: "string",
+            enum: ["amendment", "opinion", "view"],
+            description: "amendment=補正書, opinion=意見書, view=見解書",
+          },
+          title: {
+            type: "string",
+            description: "書面のタイトル（対象国の慣行に合わせる）",
+          },
+          sections: {
+            type: "array",
+            description: "書面を構成する節（見出し＋本文）",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["heading", "body"],
+              properties: {
+                heading: { type: "string", description: "節の見出し" },
+                body: {
+                  type: "string",
+                  description: "節の本文（段落は改行で区切る）",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    overall: {
+      type: "string",
+      description: "生成した書面の要約（何をどう作成したか）",
+    },
+  },
+};
+
+/** 書面の種別。amendment=補正書, opinion=意見書, view=見解書。 */
+export type DocxDocKind = "amendment" | "opinion" | "view";
+
+/** 書面の 1 節（見出し＋本文）。 */
+export type DocxSection = {
+  /** 節の見出し。 */
+  heading: string;
+  /** 節の本文（段落は改行区切り）。 */
+  body: string;
+};
+
+/** 1 書面の構造化テキスト（DOCX_SCHEMA の documents 要素）。 */
+export type DocxDocument = {
+  doc_kind: DocxDocKind;
+  /** 書面のタイトル。 */
+  title: string;
+  sections: DocxSection[];
+};
+
+/** S14 書面出力（LLM 構造化テキスト。DOCX_SCHEMA のルート）。run* の戻り値。 */
+export type DocxResult = {
+  /** 対象国（JP/US/EP/WO/CN）。 */
+  country: string;
+  documents: DocxDocument[];
+  overall: string;
+};
+
+/**
+ * dispatch 層が生成物（Storage パス・署名 URL）を付与した配信用ドキュメント。
+ * download_url は失効する署名 URL のため DB には保存しない（保存時は空文字。storage_path のみ残す）。
+ */
+export type DocxDownloadDocument = DocxDocument & {
+  /** Storage 上のパス（{user_id}/{case_id}/generated/...）。 */
+  storage_path: string;
+  /** ダウンロード用署名 URL（失効あり）。 */
+  download_url: string;
+};
+
+/** artifact(kind=docx) の payload。DocxResult に DL 情報を付与したもの（DocxView の props）。 */
+export type DocxDeliverResult = {
+  /** 対象国（JP/US/EP/WO/CN）。 */
+  country: string;
+  documents: DocxDownloadDocument[];
+  overall: string;
+};
+
+/**
+ * doc_kind → 日本語ラベル（ダウンロードファイル名・既定タイトル・UI 表示で共有する単一の正）。
+ * build.ts（.docx 生成）/ deliver.ts（再署名）/ DocxView（表示）で再利用する。
+ */
+export const DOCX_DOC_KIND_LABEL: Record<DocxDocKind, string> = {
+  amendment: "補正書",
+  opinion: "意見書",
+  view: "見解書",
+};

@@ -4,10 +4,21 @@ import { type ReactNode, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { ArtifactKind, ChatEvent } from "@/lib/chat/events";
-import type { StrategyResult, ValidityResult } from "@/lib/steps/schemas";
+import type {
+  DocxDeliverResult,
+  FullAmendmentResult,
+  OpinionResult,
+  RepAmendmentResult,
+  StrategyResult,
+  ValidityResult,
+} from "@/lib/steps/schemas";
 
 import { ChatInput } from "./ChatInput";
-import { Bubble, ChatMessages, type ChatMessage } from "./ChatMessages";
+import { Bubble, type TimelineItem } from "./ChatMessages";
+import { DocxView } from "./DocxView";
+import { FullAmendmentView } from "./FullAmendmentView";
+import { OpinionView } from "./OpinionView";
+import { RepAmendmentView } from "./RepAmendmentView";
 import { StrategyView } from "./StrategyView";
 import { ValidityChart } from "./ValidityChart";
 
@@ -21,7 +32,7 @@ import { ValidityChart } from "./ValidityChart";
  *    artifact は kind に応じて ValidityChart / StrategyView でライブ描画する。
  * 全件成功の done（ok!==false）でのみサーバーの永続メッセージを取り直し（router.refresh）楽観表示を破棄する。
  * 一部失敗（ok===false）では進捗・エラー表示を残し、再送で残りを進める。
- * （永続化済みの構造化成果物の再読込時表示は後続スライスで案件ページ側に追加する。）
+ * 永続化済みの構造化成果物は案件ページ（page.tsx）が initialItems の timeline に含めて再描画する（docx は署名 URL を再発行）。
  */
 
 type RunDoc = {
@@ -51,6 +62,18 @@ function StepArtifact({
       return <ValidityChart result={artifact.payload as ValidityResult} />;
     case "strategies":
       return <StrategyView result={artifact.payload as StrategyResult} />;
+    case "rep_amendment":
+      return (
+        <RepAmendmentView result={artifact.payload as RepAmendmentResult} />
+      );
+    case "full_amendment":
+      return (
+        <FullAmendmentView result={artifact.payload as FullAmendmentResult} />
+      );
+    case "opinion":
+      return <OpinionView result={artifact.payload as OpinionResult} />;
+    case "docx":
+      return <DocxView result={artifact.payload as DocxDeliverResult} />;
     default:
       return null;
   }
@@ -58,11 +81,11 @@ function StepArtifact({
 
 export function Chat({
   caseId,
-  initialMessages,
+  initialItems,
   children,
 }: {
   caseId: string;
-  initialMessages: ChatMessage[];
+  initialItems: TimelineItem[];
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -226,7 +249,24 @@ export function Chat({
         <div className="mx-auto max-w-[720px] space-y-7 px-6">
           {children}
 
-          <ChatMessages messages={initialMessages} />
+          {initialItems.length === 0 ? (
+            <p className="text-[13px] text-muted">
+              文書をアップロードして送信すると、各文書の全文テキスト化と概要の解析が始まります。
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {initialItems.map((it) =>
+                it.type === "message" ? (
+                  <Bubble key={it.id} role={it.role} content={it.content ?? ""} />
+                ) : (
+                  <StepArtifact
+                    key={it.id}
+                    artifact={{ kind: it.kind, payload: it.payload }}
+                  />
+                ),
+              )}
+            </div>
+          )}
 
           {showRun && (
             <div className="space-y-4">

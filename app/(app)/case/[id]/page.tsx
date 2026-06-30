@@ -1,12 +1,14 @@
 import { notFound } from "next/navigation";
 
 import { Chat } from "@/components/app/Chat";
-import type { ChatMessage } from "@/components/app/ChatMessages";
+import type { TimelineItem } from "@/components/app/ChatMessages";
 import { DeleteFileButton } from "@/components/app/DeleteFileButton";
 import { FileUpload } from "@/components/app/FileUpload";
 import { requireUser } from "@/lib/auth";
+import type { ArtifactKind } from "@/lib/chat/events";
 import { DOC_ROLES, type DocRole } from "@/lib/config/docRoles";
 import { stepLabel } from "@/lib/config/steps";
+import { resignDocxPayload } from "@/lib/docx/deliver";
 import type { Database } from "@/lib/database.types";
 
 /** 一覧表示に必要な case_files の最小フィールド（機密本文 extracted_text は取得しない）。 */
@@ -51,18 +53,49 @@ export default async function CasePage({
 
   const title = caseRow.title || caseRow.publication_number || "無題";
 
-  // チャットメッセージ（永続化済み）を時系列で取得。RLS で owner 限定。
+  // チャットメッセージ＋構造化成果物（永続化済み）を取得し、created_at でインターリーブする。RLS で owner 限定。
   const { data: messageRows } = await supabase
     .from("messages")
     .select("id, role, content, created_at")
     .eq("case_id", id)
     .order("created_at", { ascending: true });
 
-  const chatMessages: ChatMessage[] = (messageRows ?? []).map((m) => ({
-    id: m.id,
-    role: m.role,
-    content: m.content,
+  const { data: artifactRows } = await supabase
+    .from("case_artifacts")
+    .select("id, kind, payload, created_at")
+    .eq("case_id", id)
+    .order("created_at", { ascending: true });
+
+  const messageItems = (messageRows ?? []).map((m) => ({
+    at: m.created_at,
+    item: {
+      type: "message" as const,
+      id: m.id,
+      role: m.role,
+      content: m.content,
+    },
   }));
+
+  // docx は失効する署名 URL を保存しないため、storage_path から再署名して DL 可能にする（PRD §8.2）。
+  const artifactItems = await Promise.all(
+    (artifactRows ?? []).map(async (a) => ({
+      at: a.created_at,
+      item: {
+        type: "artifact" as const,
+        id: a.id,
+        kind: a.kind as ArtifactKind,
+        payload:
+          a.kind === "docx"
+            ? await resignDocxPayload(supabase, a.payload)
+            : a.payload,
+      },
+    })),
+  );
+
+  // user(N) → artifact(N) → assistant(N+1) の保存順がそのまま時系列で正しく並ぶ。
+  const timeline: TimelineItem[] = [...messageItems, ...artifactItems]
+    .sort((x, y) => (x.at ?? "").localeCompare(y.at ?? ""))
+    .map((x) => x.item);
 
   return (
     <div className="flex h-full flex-col">
@@ -80,7 +113,7 @@ export default async function CasePage({
       </div>
 
       {/* 文書（役割別アップロード）＋チャット（Slice 3） */}
-      <Chat caseId={id} initialMessages={chatMessages}>
+      <Chat caseId={id} initialItems={timeline}>
           <section className="space-y-5">
             {DOC_ROLES.map((meta) => {
               const roleFiles = byRole(meta.role);
