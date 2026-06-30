@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { ArtifactKind, ChatEvent } from "@/lib/chat/events";
 import type {
   FullAmendmentResult,
+  OpinionResult,
   RepAmendmentResult,
   StrategyResult,
   ValidityResult,
@@ -14,6 +15,7 @@ import type {
 import { ChatInput } from "./ChatInput";
 import { Bubble, ChatMessages, type ChatMessage } from "./ChatMessages";
 import { FullAmendmentView } from "./FullAmendmentView";
+import { OpinionView } from "./OpinionView";
 import { RepAmendmentView } from "./RepAmendmentView";
 import { StrategyView } from "./StrategyView";
 import { ValidityChart } from "./ValidityChart";
@@ -66,6 +68,8 @@ function StepArtifact({
       return (
         <FullAmendmentView result={artifact.payload as FullAmendmentResult} />
       );
+    case "opinion":
+      return <OpinionView result={artifact.payload as OpinionResult} />;
     default:
       return null;
   }

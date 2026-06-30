@@ -542,3 +542,87 @@ export type FullAmendmentResult = {
   addressed_rejections: string[];
   overall: string;
 };
+
+/**
+ * S12 意見書（PRD §11-S12）。
+ * 全文補正案に基づく拒絶理由ごとの反論。できる限り明細書記載から抜粋して主張し、エストッペル
+ * （包袋禁反言）で制限がかからない主張にする。全ての拒絶理由に対応する。
+ */
+export const OPINION_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["country", "introduction", "arguments", "conclusion", "overall"],
+  properties: {
+    country: {
+      type: "string",
+      description: "対象国（JP/US/EP/WO/CN）。意見書の作法の基準。",
+    },
+    introduction: {
+      type: "string",
+      description: "前置き（補正の概要・全体としての主張の骨子）",
+    },
+    arguments: {
+      type: "array",
+      description: "拒絶理由ごとの反論（全ての拒絶理由を対象にする）",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["rejection", "argument", "spec_basis", "estoppel_note"],
+        properties: {
+          rejection: {
+            type: "string",
+            description: "対象の拒絶理由（種類・対象請求項）",
+          },
+          argument: {
+            type: "string",
+            description:
+              "反論の主張（補正による解消／意見による反論。審査官の弱点をどう突くか）",
+          },
+          spec_basis: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "主張の根拠となる本願明細書の記載（抜粋・段落番号等）。エストッペル配慮で明細書記載を主体にする。",
+          },
+          estoppel_note: {
+            type: "string",
+            description:
+              "エストッペル配慮の補足（不利な限定解釈を避けるための留意点。特になければその旨）",
+          },
+        },
+      },
+    },
+    conclusion: {
+      type: "string",
+      description: "むすび（全拒絶理由が解消され特許査定が相当である旨）",
+    },
+    overall: {
+      type: "string",
+      description: "総評と次ステップ（書面出力）への橋渡し",
+    },
+  },
+};
+
+/** 意見書の 1 反論（拒絶理由単位）。 */
+export type OpinionArgument = {
+  /** 対象の拒絶理由（種類・対象請求項）。 */
+  rejection: string;
+  /** 反論の主張。 */
+  argument: string;
+  /** 主張の根拠となる明細書記載（抜粋・段落番号等）。 */
+  spec_basis: string[];
+  /** エストッペル配慮の補足。 */
+  estoppel_note: string;
+};
+
+/** S12 意見書の構造化結果（OPINION_SCHEMA のルート）。 */
+export type OpinionResult = {
+  /** 対象国（JP/US/EP/WO/CN）。 */
+  country: string;
+  /** 前置き（補正の概要・主張の骨子）。 */
+  introduction: string;
+  arguments: OpinionArgument[];
+  /** むすび。 */
+  conclusion: string;
+  overall: string;
+};
