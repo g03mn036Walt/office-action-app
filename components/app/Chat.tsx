@@ -4,10 +4,15 @@ import { type ReactNode, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { ArtifactKind, ChatEvent } from "@/lib/chat/events";
-import type { StrategyResult, ValidityResult } from "@/lib/steps/schemas";
+import type {
+  RepAmendmentResult,
+  StrategyResult,
+  ValidityResult,
+} from "@/lib/steps/schemas";
 
 import { ChatInput } from "./ChatInput";
 import { Bubble, ChatMessages, type ChatMessage } from "./ChatMessages";
+import { RepAmendmentView } from "./RepAmendmentView";
 import { StrategyView } from "./StrategyView";
 import { ValidityChart } from "./ValidityChart";
 
@@ -51,6 +56,10 @@ function StepArtifact({
       return <ValidityChart result={artifact.payload as ValidityResult} />;
     case "strategies":
       return <StrategyView result={artifact.payload as StrategyResult} />;
+    case "rep_amendment":
+      return (
+        <RepAmendmentView result={artifact.payload as RepAmendmentResult} />
+      );
     default:
       return null;
   }

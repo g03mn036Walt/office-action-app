@@ -293,3 +293,165 @@ export type StrategyResult = {
   recommendation: StrategyRecommendation;
   overall: string;
 };
+
+/**
+ * 補正後クレームを文節（segment）の列で表す 1 要素（PRD §9.4 の補正箇所ハイライトの素）。
+ * change で keep（据置）/ add（追記）/ delete（削除）を区別する。S8 代表補正・S10 全文補正で共有。
+ */
+const AMENDMENT_SEGMENT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["text", "change"],
+  properties: {
+    text: { type: "string", description: "文節（クレームの一部の記載）" },
+    change: {
+      type: "string",
+      enum: ["keep", "add", "delete"],
+      description:
+        "keep=現クレームから据置, add=補正で追記, delete=補正で削除。追記・削除は独立した segment に分ける。",
+    },
+  },
+};
+
+/**
+ * S8 代表クレーム補正（PRD §11-S8・重要）。
+ * 拒絶理由解消に必要最小限の補正のみ。代表請求項を対象に、補正後クレームを segment 列で表し
+ * 追記/削除をハイライト可能にする。可能なら広狭の異なる最小限の 3 案を比較する。
+ * ※ 3 案・広狭の幅は strict schema では minItems で強制できないため description とプロンプトで担保する。
+ */
+export const REP_AMENDMENT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["country", "representative_claim_no", "options", "recommendation", "overall"],
+  properties: {
+    country: {
+      type: "string",
+      description: "対象国（JP/US/EP/WO/CN）。補正運用ルールの基準。",
+    },
+    representative_claim_no: {
+      type: "string",
+      description: "代表として補正する請求項番号（通常は独立請求項）",
+    },
+    options: {
+      type: "array",
+      description:
+        "最小限度の異なる補正案。可能なら広狭の幅を持たせた 3 案。各案は必要最小限の補正に徹する。",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "label",
+          "breadth",
+          "segments",
+          "basis",
+          "addressed_rejections",
+          "claim_scope",
+          "rationale",
+          "risks",
+        ],
+        properties: {
+          label: { type: "string", description: "案の識別名（例: 案A）" },
+          breadth: {
+            type: "string",
+            enum: ["broad", "medium", "narrow"],
+            description:
+              "得られる権利範囲の広さ。broad=最も広い, medium=中間, narrow=最も狭く確実",
+          },
+          segments: {
+            type: "array",
+            description: "補正後の代表請求項（文節列。change で補正箇所を区別）",
+            items: AMENDMENT_SEGMENT_SCHEMA,
+          },
+          basis: {
+            type: "string",
+            description: "新規事項でない根拠（本願明細書の対応箇所・段落番号等）",
+          },
+          addressed_rejections: {
+            type: "array",
+            items: { type: "string" },
+            description: "この案が解消する拒絶理由",
+          },
+          claim_scope: {
+            type: "string",
+            description: "この案で得られる権利範囲（どこまで広く取れるか・どの限定が入るか）",
+          },
+          rationale: {
+            type: "string",
+            description:
+              "なぜこの補正で拒絶理由を覆せるか（Step4/Step6 で押さえた審査官の弱点との対応）",
+          },
+          risks: {
+            type: "array",
+            items: { type: "string" },
+            description: "リスク（過剰な限定／新規事項の懸念／許可されない可能性 等）",
+          },
+        },
+      },
+    },
+    recommendation: {
+      type: "object",
+      additionalProperties: false,
+      required: ["recommended_label", "reason"],
+      properties: {
+        recommended_label: {
+          type: "string",
+          description: "推奨する案の label",
+        },
+        reason: {
+          type: "string",
+          description: "推奨理由（解消の確実性と権利範囲の広さのバランス）",
+        },
+      },
+    },
+    overall: {
+      type: "string",
+      description: "総評と次ステップ（全文補正）への橋渡し",
+    },
+  },
+};
+
+/**
+ * REP_AMENDMENT_SCHEMA / FULL_AMENDMENT_SCHEMA に対応する TypeScript 型。
+ * run* の戻り値（パース後）と各 View の props で共有する（client/server 両用）。
+ * 構造はスキーマと一致させること（スキーマ変更時は両方更新）。
+ */
+
+/** 補正の種別。keep=据置, add=追記, delete=削除。 */
+export type AmendmentChange = "keep" | "add" | "delete";
+
+/** 補正後クレームの 1 文節（change で補正箇所を区別＝ハイライトの素）。 */
+export type AmendmentSegment = {
+  /** 文節（クレームの一部の記載）。 */
+  text: string;
+  change: AmendmentChange;
+};
+
+/** 代表補正の 1 案（広狭の幅を持つ。必要最小限の補正）。 */
+export type AmendmentOption = {
+  /** 案の識別名（例: "案A"）。 */
+  label: string;
+  breadth: StrategyBreadth;
+  /** 補正後の代表請求項（文節列）。 */
+  segments: AmendmentSegment[];
+  /** 新規事項でない根拠（明細書の対応箇所）。 */
+  basis: string;
+  /** この案が解消する拒絶理由。 */
+  addressed_rejections: string[];
+  /** 得られる権利範囲。 */
+  claim_scope: string;
+  /** 拒絶理由を覆せる根拠（審査官の弱点との対応）。 */
+  rationale: string;
+  /** リスク。 */
+  risks: string[];
+};
+
+/** S8 代表クレーム補正の構造化結果（REP_AMENDMENT_SCHEMA のルート）。 */
+export type RepAmendmentResult = {
+  /** 対象国（JP/US/EP/WO/CN）。 */
+  country: string;
+  /** 代表として補正する請求項番号。 */
+  representative_claim_no: string;
+  options: AmendmentOption[];
+  recommendation: StrategyRecommendation;
+  overall: string;
+};
