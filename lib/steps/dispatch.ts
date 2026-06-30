@@ -193,7 +193,7 @@ export async function runStep(
  * runStepAndPersist と違い、LLM の構造化テキスト（DocxResult）から .docx を生成して Storage に保存し、
  * 署名 URL を付与した artifact を送る。生成物が揃ってから artifact → step_done の順で送り、兄弟ステップと
  * 同じ start → artifact → done の体感にする。永続化する payload は失効する署名 URL を除き storage_path
- * のみ残す（再読込時の再署名は後続スライス）。server-only（機密本文をログに出さない＝ガードレール7）。
+ * のみ残す（再読込時は案件ページが lib/docx/deliver.ts で署名 URL を再発行する）。server-only（機密本文をログに出さない＝ガードレール7）。
  */
 async function runDocxAndPersist(
   supabase: SupabaseClient<Database>,

@@ -32,7 +32,7 @@ import { ValidityChart } from "./ValidityChart";
  *    artifact は kind に応じて ValidityChart / StrategyView でライブ描画する。
  * 全件成功の done（ok!==false）でのみサーバーの永続メッセージを取り直し（router.refresh）楽観表示を破棄する。
  * 一部失敗（ok===false）では進捗・エラー表示を残し、再送で残りを進める。
- * （永続化済みの構造化成果物の再読込時表示は後続スライスで案件ページ側に追加する。）
+ * 永続化済みの構造化成果物は案件ページ（page.tsx）が initialItems の timeline に含めて再描画する（docx は署名 URL を再発行）。
  */
 
 type RunDoc = {
