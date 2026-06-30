@@ -730,3 +730,13 @@ export type DocxDeliverResult = {
   documents: DocxDownloadDocument[];
   overall: string;
 };
+
+/**
+ * doc_kind → 日本語ラベル（ダウンロードファイル名・既定タイトル・UI 表示で共有する単一の正）。
+ * build.ts（.docx 生成）/ deliver.ts（再署名）/ DocxView（表示）で再利用する。
+ */
+export const DOCX_DOC_KIND_LABEL: Record<DocxDocKind, string> = {
+  amendment: "補正書",
+  opinion: "意見書",
+  view: "見解書",
+};

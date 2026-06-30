@@ -14,7 +14,7 @@ import type {
 } from "@/lib/steps/schemas";
 
 import { ChatInput } from "./ChatInput";
-import { Bubble, ChatMessages, type ChatMessage } from "./ChatMessages";
+import { Bubble, type TimelineItem } from "./ChatMessages";
 import { DocxView } from "./DocxView";
 import { FullAmendmentView } from "./FullAmendmentView";
 import { OpinionView } from "./OpinionView";
@@ -81,11 +81,11 @@ function StepArtifact({
 
 export function Chat({
   caseId,
-  initialMessages,
+  initialItems,
   children,
 }: {
   caseId: string;
-  initialMessages: ChatMessage[];
+  initialItems: TimelineItem[];
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -249,7 +249,24 @@ export function Chat({
         <div className="mx-auto max-w-[720px] space-y-7 px-6">
           {children}
 
-          <ChatMessages messages={initialMessages} />
+          {initialItems.length === 0 ? (
+            <p className="text-[13px] text-muted">
+              文書をアップロードして送信すると、各文書の全文テキスト化と概要の解析が始まります。
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {initialItems.map((it) =>
+                it.type === "message" ? (
+                  <Bubble key={it.id} role={it.role} content={it.content ?? ""} />
+                ) : (
+                  <StepArtifact
+                    key={it.id}
+                    artifact={{ kind: it.kind, payload: it.payload }}
+                  />
+                ),
+              )}
+            </div>
+          )}
 
           {showRun && (
             <div className="space-y-4">

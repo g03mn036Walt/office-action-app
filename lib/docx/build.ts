@@ -2,7 +2,11 @@ import "server-only";
 
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 
-import type { DocxDocKind, DocxResult } from "@/lib/steps/schemas";
+import {
+  DOCX_DOC_KIND_LABEL,
+  type DocxDocKind,
+  type DocxResult,
+} from "@/lib/steps/schemas";
 
 /**
  * S14 書面出力の .docx 生成（PRD §7.7 / §11-S14 / CLAUDE.md ガードレール6）。
@@ -11,13 +15,6 @@ import type { DocxDocKind, DocxResult } from "@/lib/steps/schemas";
  * 使って実ファイル（Buffer）を組み立てる。**純関数・I/O なし**（Storage 保存・署名 URL は dispatch 層の責務）。
  * server-only（実行はサーバーのみ。本文はログに出さない＝ガードレール7）。
  */
-
-/** doc_kind → 日本語ラベル（ダウンロードファイル名・既定タイトルに使用）。 */
-const DOC_KIND_LABEL: Record<DocxDocKind, string> = {
-  amendment: "補正書",
-  opinion: "意見書",
-  view: "見解書",
-};
 
 /** 生成した 1 書面の .docx（Buffer）と表示用メタ。 */
 export type DocxFile = {
@@ -46,7 +43,7 @@ export async function buildDocxFiles(result: DocxResult): Promise<DocxFile[]> {
   const documents = result.documents ?? [];
   return Promise.all(
     documents.map(async (doc) => {
-      const label = DOC_KIND_LABEL[doc.doc_kind] ?? "書面";
+      const label = DOCX_DOC_KIND_LABEL[doc.doc_kind] ?? "書面";
       const title = doc.title?.trim() || label;
 
       const children: Paragraph[] = [

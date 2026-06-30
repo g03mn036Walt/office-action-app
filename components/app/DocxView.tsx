@@ -1,7 +1,7 @@
-import type {
-  DocxDeliverResult,
-  DocxDocKind,
-  DocxDownloadDocument,
+import {
+  DOCX_DOC_KIND_LABEL,
+  type DocxDeliverResult,
+  type DocxDownloadDocument,
 } from "@/lib/steps/schemas";
 
 /**
@@ -12,15 +12,8 @@ import type {
  * 色は app/globals.css の @theme トークンのみ（PRD §9.0）。payload は実行時 unknown 由来のため配列は ?? [] で防御する。
  */
 
-/** doc_kind → 日本語ラベル（build.ts と一致）。 */
-const DOC_KIND_LABEL: Record<DocxDocKind, string> = {
-  amendment: "補正書",
-  opinion: "意見書",
-  view: "見解書",
-};
-
 function DocCard({ doc }: { doc: DocxDownloadDocument }) {
-  const label = DOC_KIND_LABEL[doc.doc_kind] ?? "書面";
+  const label = DOCX_DOC_KIND_LABEL[doc.doc_kind] ?? "書面";
   const sections = doc.sections ?? [];
   return (
     <div className="rounded-lg border border-line bg-surface p-4">
