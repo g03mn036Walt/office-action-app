@@ -77,3 +77,8 @@ Step4+ は全文書の `extracted_text` を送る前提（PRD §7.5、原本 PDF
 
 ## 進捗
 - 2026-06-28: 計画確定・`phase2-steps` ブランチ作成・Track A 手順1 着手。
+- 2026-06-30: `claude/phase2-s8-s14-9klts1` で S8〜S14 を S4/S6 と同型で実装（1 ステップ=1 コミット）。
+  - S8/S9 代表補正（rep_amendment）/ S10/S11 全文補正（full_amendment）/ S12/S13 意見書（opinion）/
+    S14 書面出力（docx: Claude 構造化テキスト→`docx` で .docx 生成→Storage→署名 URL）。
+  - `nextStepToRun`/`runStep` を 14 まで拡張、S14 のみ `runDocxAndPersist`（Storage/署名 URL 担当）。
+  - 各コミット tsc 緑・eslint 緑。実 API 検証・:3000 E2E・本番デプロイはローカルへ委譲（env 不在のため）。
