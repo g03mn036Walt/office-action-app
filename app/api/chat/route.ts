@@ -3,15 +3,19 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { nextStepToRun, runStep } from "@/lib/steps/dispatch";
 import { toUserMessage } from "@/lib/steps/errors";
+import { classifyIntent } from "@/lib/steps/intent";
 import { runAnalysis } from "@/lib/steps/runAnalysis";
+import { runClarification, runFollowup } from "@/lib/steps/runFollowup";
 
 /**
- * チャットエンドポイント（Slice 3 / Phase 2）。
+ * チャットエンドポイント（Phase 2）。
  *
- * 認証・案件所有確認を行い、NDJSON ストリーム（1 イベント＝JSON 1 行）でステップ実行を返す薄いシェル。
- * 実処理は各ステップの実行コアに委譲する:
- *  - Step2-3（解析・全文テキスト化・要約）= `lib/steps/runAnalysis`（2b 実装を抽出）。
- *  - Step4+（妥当性評価・応答方針 …）= 後続スライスでディスパッチを追加（current_step で振り分け）。
+ * 認証・案件所有確認を行い、NDJSON ストリーム（1 イベント＝JSON 1 行）で結果を返す薄いシェル。
+ * 自由入力の意図を分類（§10）し、実処理を各実行コアに委譲する:
+ *  - advance …… 次の 1 ステップを実行（Step2-3 解析＝`runAnalysis` / Step4+＝`dispatch.runStep`）。
+ *  - autorun …… 指定ステップまで連続実行（Slice 2 で追加。現状は次の 1 ステップ）。
+ *  - followup … 現ステップへの追問に回答（`runFollowup`。ステップは進めない）。
+ *  - ambiguous … 短い確認を返す（`runClarification`）。
  *
  * Anthropic SDK はサーバー/Node 前提（lib/anthropic/client.ts は server-only）。複数 PDF の文字起こしは
  * 既定のサーバーレス時間を超えうるため runtime/maxDuration を明示し、streaming で実時間を抑える（PRD §6）。
@@ -71,20 +75,43 @@ export async function POST(request: NextRequest) {
       };
 
       try {
-        // current_step から次に実行する 1 ステップを決めて振り分ける（最小ディスパッチャ）。
-        const target = nextStepToRun(caseRow.current_step);
+        // 自由入力の意図を分類（§10）。空入力・失敗時は安全側の advance にフォールバックする。
+        const intent = await classifyIntent(message, caseRow.current_step);
         let ok: boolean;
-        if (target === "analysis") {
-          ok = await runAnalysis(supabase, caseId, message, send);
-        } else if (target === "unsupported") {
-          send({
-            t: "error",
-            message:
-              "検討フローは Step14（書面出力）まで完了しています。追加の対応はまだ実装されていません。",
-          });
-          ok = false;
+        if (intent.mode === "followup") {
+          // 現ステップへの追問。ステップは進めない。
+          ok = await runFollowup(
+            supabase,
+            caseId,
+            message,
+            caseRow.current_step,
+            send,
+          );
+        } else if (intent.mode === "ambiguous") {
+          // 意図が掴めない場合は短い確認を返す（進めない）。
+          ok = await runClarification(
+            supabase,
+            caseId,
+            message,
+            caseRow.current_step,
+            send,
+          );
         } else {
-          ok = await runStep(supabase, caseId, message, target, send);
+          // advance / autorun → 次に実行する 1 ステップへ振り分ける。
+          // （autorun の「対象ステップまで連続実行」は Slice 2 でクライアント継続方式により追加。）
+          const target = nextStepToRun(caseRow.current_step);
+          if (target === "analysis") {
+            ok = await runAnalysis(supabase, caseId, message, send);
+          } else if (target === "unsupported") {
+            send({
+              t: "error",
+              message:
+                "検討フローは Step14（書面出力）まで完了しています。追加の対応はまだ実装されていません。",
+            });
+            ok = false;
+          } else {
+            ok = await runStep(supabase, caseId, message, target, send);
+          }
         }
         finish(ok);
       } catch (err) {

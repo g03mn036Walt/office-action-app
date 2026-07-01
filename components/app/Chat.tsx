@@ -43,10 +43,15 @@ type RunDoc = {
   error?: string;
 };
 
-/** Step4+ の実行中状態（1 リクエスト＝1 ステップ）。 */
+/**
+ * Step4+ の実行中状態（1 リクエスト＝1 ステップ）。
+ * mode="step": 正規ステップの実行（Step N のヘッダ＋成果物）。
+ * mode="text": 追問への回答など、ステップを進めない逐次テキスト（アシスタント吹き出しで表示）。
+ */
 type StepRun = {
   step: number;
   status: "running" | "done" | "error";
+  mode: "step" | "text";
   text: string;
   artifact: { kind: ArtifactKind; payload: unknown } | null;
 };
@@ -128,17 +133,20 @@ export function Chat({
         setStepRun({
           step: ev.step,
           status: "running",
+          mode: "step",
           text: "",
           artifact: null,
         });
         break;
       case "text_delta":
+        // text_delta のみで始まる流れ＝追問の回答（mode="text"）。step_start 先行なら mode を保つ。
         setStepRun((s) =>
           s
             ? { ...s, text: s.text + ev.text }
             : {
                 step: ev.step,
                 status: "running",
+                mode: "text",
                 text: ev.text,
                 artifact: null,
               },
@@ -151,6 +159,7 @@ export function Chat({
             : {
                 step: ev.step,
                 status: "running",
+                mode: "step",
                 text: "",
                 artifact: { kind: ev.kind, payload: ev.payload },
               },
@@ -300,7 +309,18 @@ export function Chat({
                   </div>
                 </div>
               )}
-              {stepRun && (
+              {stepRun && stepRun.mode === "text" && (
+                // 追問の回答（ステップは進めない）。アシスタント吹き出しとして逐次表示。
+                <div className="space-y-2">
+                  {stepRun.text && (
+                    <Bubble role="assistant" content={stepRun.text} />
+                  )}
+                  {stepRun.status === "running" && !stepRun.text && (
+                    <p className="text-[13px] text-muted">回答中…</p>
+                  )}
+                </div>
+              )}
+              {stepRun && stepRun.mode === "step" && (
                 <div className="space-y-3">
                   <div className="text-[13px] font-semibold text-ink-soft">
                     {stepRun.status === "running" && `Step ${stepRun.step} 実行中…`}

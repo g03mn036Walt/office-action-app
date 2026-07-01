@@ -740,3 +740,44 @@ export const DOCX_DOC_KIND_LABEL: Record<DocxDocKind, string> = {
   opinion: "意見書",
   view: "見解書",
 };
+
+/**
+ * 自由入力の意図分類（PRD §10 /「進む」判定・§7.10 オートラン）。
+ * ユーザーの1メッセージが「次の1ステップ実行 / 指定ステップまで連続実行 / 現ステップへの追問 / 不明」の
+ * どれかを判定する。target_step は autorun の停止点＝到達させたい current_step（例: 7=応答方針まで）。
+ * 非 autorun では target_step は無視（既定 7 を入れておく）。
+ */
+export const INTENT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["mode", "target_step", "reason"],
+  properties: {
+    mode: {
+      type: "string",
+      enum: ["advance", "autorun", "followup", "ambiguous"],
+      description:
+        "advance=次の1ステップだけ進める, autorun=指定ステップまで連続実行, followup=現ステップへの質問・修正依頼（進めない）, ambiguous=意図が不明で確認が必要",
+    },
+    target_step: {
+      type: "integer",
+      enum: [5, 7, 9, 11, 13, 15],
+      description:
+        "autorun の停止点（到達させたい current_step）。5=妥当性(S4)まで, 7=応答方針(S6)まで〔既定〕, 9=代表補正(S8)まで, 11=全文補正(S10)まで, 13=意見書(S12)まで, 15=書面出力(S14)まで。autorun 以外では無視。",
+    },
+    reason: {
+      type: "string",
+      description: "判定理由（簡潔に）",
+    },
+  },
+};
+
+/** 意図分類の種別。 */
+export type IntentMode = "advance" | "autorun" | "followup" | "ambiguous";
+
+/** 自由入力の意図分類結果（INTENT_SCHEMA のルート）。 */
+export type IntentResult = {
+  mode: IntentMode;
+  /** autorun の停止点（到達させたい current_step）。非 autorun では無視。 */
+  target_step: number;
+  reason: string;
+};

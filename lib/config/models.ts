@@ -15,6 +15,13 @@ export type AppModel = typeof SONNET_MODEL | typeof OPUS_MODEL;
 /** 既定モデル（コスト重視）。 */
 export const DEFAULT_MODEL: AppModel = SONNET_MODEL;
 
+/**
+ * 自由入力の意図分類（§10 / オートラン）に使う軽量モデル。
+ * 出力が小さい分類タスクなので安価・高速でよい。既定は Sonnet（アカウントで検証済み）だが、
+ * さらに安く/速くしたい場合はここだけ差し替える（他コードは CLASSIFIER_MODEL 経由で参照）。
+ */
+export const CLASSIFIER_MODEL: AppModel = SONNET_MODEL;
+
 /** OA 検討フローの全ステップ番号（1..14）。 */
 export type StepNo =
   | 1 | 2 | 3 | 4 | 5 | 6 | 7
