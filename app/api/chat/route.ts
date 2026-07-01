@@ -36,6 +36,7 @@ async function runOneStep(
   message: string,
   currentStep: number,
   send: Send,
+  cache = false,
 ): Promise<boolean> {
   const target = nextStepToRun(currentStep);
   if (target === "analysis") {
@@ -49,7 +50,7 @@ async function runOneStep(
     });
     return false;
   }
-  return runStep(supabase, caseId, message, target, send);
+  return runStep(supabase, caseId, message, target, send, cache);
 }
 
 /**
@@ -134,7 +135,8 @@ export async function POST(request: NextRequest) {
         let ok: boolean;
         if (autorunTo != null) {
           // オートラン継続リクエスト: 分類せず次の 1 ステップを実行し、未達なら継続を促す。
-          ok = await runOneStep(supabase, caseId, "", caseRow.current_step, send);
+          // 連続実行なので文書ブロックをキャッシュする（§7.5）。
+          ok = await runOneStep(supabase, caseId, "", caseRow.current_step, send, true);
           if (ok) await maybeSignalAutorun(supabase, caseId, autorunTo, send);
         } else {
           // 初回リクエスト: 自由入力の意図を分類（§10）。空入力・失敗時は安全側の advance。
@@ -158,13 +160,14 @@ export async function POST(request: NextRequest) {
               send,
             );
           } else if (intent.mode === "autorun") {
-            // 初回オートラン: 最初の 1 ステップを実行し、目標未達なら継続を促す。
+            // 初回オートラン: 最初の 1 ステップを実行し、目標未達なら継続を促す（文書はキャッシュ・§7.5）。
             ok = await runOneStep(
               supabase,
               caseId,
               message,
               caseRow.current_step,
               send,
+              true,
             );
             if (ok) {
               await maybeSignalAutorun(
