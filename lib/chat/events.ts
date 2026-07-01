@@ -38,8 +38,13 @@ export type StepEvent =
   | { t: "artifact"; step: number; kind: ArtifactKind; payload: unknown }
   /** ステップ完了＆永続化済み。UI は currentStep で進捗表示を更新する。 */
   | { t: "step_done"; step: number; currentStep: number }
-  /** オートランで次ステップへ進む（§7.10）。 */
-  | { t: "autorun_advance"; from: number; to: number };
+  /** オートランで次ステップへ進む（§7.10・進捗表示用）。 */
+  | { t: "autorun_advance"; from: number; to: number }
+  /**
+   * オートラン継続の合図（§7.10）。まだ目標(target=停止させたい current_step)に達していないので、
+   * クライアントは done 後に autorunTo=target で継続リクエストを投げる（Hobby の関数時間内に 1 ステップずつ）。
+   */
+  | { t: "autorun_continue"; target: number };
 
 /** 文書単位／ステップ単位の双方で使う共通の終端・エラー。 */
 export type CommonEvent =
