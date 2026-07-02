@@ -101,6 +101,7 @@ async function transcribeChunk(
       .beta.messages.stream({
         model: modelForStep(2, model),
         max_tokens: CHUNK_MAX_TOKENS,
+        thinking: { type: "disabled" },
         betas: [FILES_API_BETA],
         system: S2_SYSTEM_PROMPT,
         output_config: { format: { type: "json_schema", schema: FULL_TEXT_SCHEMA } },

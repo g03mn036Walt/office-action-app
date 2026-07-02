@@ -1,13 +1,17 @@
 /**
  * 「ステップ → モデル」の一元管理（PRD §11 / CLAUDE.md）。
  *
- * 既定は全ステップ `claude-sonnet-4-6`（コスト重視）。
+ * 既定は全ステップ `claude-sonnet-5`（コスト重視）。
  * 中核ステップ（S4 妥当性 / S6 応答方針 / S8 補正 / S10 全文補正）は品質重要のため、
  * Sonnet で不足する場合はここを `OPUS_MODEL` に切り替えるだけで運用変更できる。
  * モデル名はハードコードせず、必ずこの定数経由で参照すること。
+ *
+ * 注: Sonnet 5 は `thinking` 省略時に adaptive thinking が既定 ON になる（4.6 と挙動が異なる）。
+ * 本アプリの各ステップは max_tokens 内に構造化出力を収める前提のため、各 LLM 呼び出しで
+ * `thinking: { type: "disabled" }` を明示して従来挙動を維持する（分類の 1024 トークン等が破綻しないように）。
  */
 
-export const SONNET_MODEL = "claude-sonnet-4-6" as const;
+export const SONNET_MODEL = "claude-sonnet-5" as const;
 export const OPUS_MODEL = "claude-opus-4-8" as const;
 
 export type AppModel = typeof SONNET_MODEL | typeof OPUS_MODEL;

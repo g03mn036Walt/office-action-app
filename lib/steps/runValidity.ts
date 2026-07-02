@@ -95,6 +95,7 @@ async function callValidity(
     .beta.messages.stream({
       model: modelForStep(STEP, opts.model),
       max_tokens: 32000,
+      thinking: { type: "disabled" },
       system,
       output_config: { format: { type: "json_schema", schema: VALIDITY_SCHEMA } },
       messages,

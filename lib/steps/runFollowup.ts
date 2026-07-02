@@ -55,6 +55,7 @@ export async function runFollowup(
     const stream = getAnthropic().messages.stream({
       model,
       max_tokens: 8000,
+      thinking: { type: "disabled" },
       system: FOLLOWUP_SYSTEM_PROMPT,
       messages: [...ctx.history, { role: "user", content: userContent }],
     });

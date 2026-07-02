@@ -85,6 +85,7 @@ async function callFullAmendment(
     .beta.messages.stream({
       model: modelForStep(STEP, opts.model),
       max_tokens: 32000,
+      thinking: { type: "disabled" },
       system,
       output_config: {
         format: { type: "json_schema", schema: FULL_AMENDMENT_SCHEMA },

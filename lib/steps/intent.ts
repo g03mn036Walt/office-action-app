@@ -68,6 +68,7 @@ export async function classifyIntent(
       .beta.messages.stream({
         model: CLASSIFIER_MODEL,
         max_tokens: 1024,
+        thinking: { type: "disabled" },
         system: INTENT_SYSTEM_PROMPT,
         output_config: { format: { type: "json_schema", schema: INTENT_SCHEMA } },
         messages: [{ role: "user", content: userContent }],

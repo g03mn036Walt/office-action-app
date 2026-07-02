@@ -95,6 +95,7 @@ async function analyzeNonPdf(
   const final = await getAnthropic().messages.create({
     model: modelForStep(2, model),
     max_tokens: 4000,
+    thinking: { type: "disabled" },
     system: S2_SYSTEM_PROMPT,
     output_config: { format: { type: "json_schema", schema: SUMMARY_SCHEMA } },
     messages: [
