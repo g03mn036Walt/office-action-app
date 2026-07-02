@@ -20,6 +20,7 @@ import { runOpinion } from "@/lib/steps/runOpinion";
 import { runRepAmendment } from "@/lib/steps/runRepAmendment";
 import { runStrategy } from "@/lib/steps/runStrategy";
 import { runValidity } from "@/lib/steps/runValidity";
+import type { StepCallOptions } from "@/lib/config/models";
 import type {
   DocxDeliverResult,
   DocxDownloadDocument,
@@ -75,13 +76,13 @@ async function runStepAndPersist<R>(
       s: SupabaseClient<Database>,
       c: string,
       m: string,
-      cache: boolean,
+      call: StepCallOptions,
     ) => AsyncGenerator<StepEvent, R, void>;
     kind: ArtifactKind;
     /** 構造化結果からチャット本文（messages.content）を組む。 */
     assistantText: (result: R) => string;
-    /** オートラン継続時のみ true（文書ブロックをキャッシュ＝§7.5）。 */
-    cache: boolean;
+    /** 呼び出しオプション（cache=オートラン継続時のみ true・§7.5 / model=UI ピッカーの選択）。 */
+    call: StepCallOptions;
   },
 ): Promise<boolean> {
   try {
@@ -93,7 +94,7 @@ async function runStepAndPersist<R>(
     );
 
     // 実行コアを回す: StepEvent はそのまま転送し、step_done から次ステップ番号を得る。
-    const gen = opts.runner(supabase, caseId, message, opts.cache);
+    const gen = opts.runner(supabase, caseId, message, opts.call);
     let result: R | undefined;
     let nextStep = opts.stepNo + 1;
     while (true) {
@@ -141,7 +142,7 @@ export async function runStep(
   message: string,
   step: 4 | 6 | 8 | 10 | 12 | 14,
   send: SendFn,
-  cache = false,
+  call: StepCallOptions = {},
 ): Promise<boolean> {
   if (step === 4) {
     return runStepAndPersist<ValidityResult>(supabase, caseId, message, send, {
@@ -150,7 +151,7 @@ export async function runStep(
       kind: "validity",
       assistantText: (r) =>
         `妥当性評価を実施しました。\n\n${r.overall ?? ""}`.trim(),
-      cache,
+      call,
     });
   }
   if (step === 6) {
@@ -160,7 +161,7 @@ export async function runStep(
       kind: "strategies",
       assistantText: (r) =>
         `応答方針を立案しました（推奨: ${r.recommendation?.recommended_label ?? "—"}）。\n\n${r.overall ?? ""}`.trim(),
-      cache,
+      call,
     });
   }
   if (step === 8) {
@@ -170,7 +171,7 @@ export async function runStep(
       kind: "rep_amendment",
       assistantText: (r) =>
         `代表クレームの補正案を作成しました（推奨: ${r.recommendation?.recommended_label ?? "—"}）。\n\n${r.overall ?? ""}`.trim(),
-      cache,
+      call,
     });
   }
   if (step === 10) {
@@ -180,7 +181,7 @@ export async function runStep(
       kind: "full_amendment",
       assistantText: (r) =>
         `全文補正案を作成しました。\n\n${r.summary_of_changes ?? ""}`.trim(),
-      cache,
+      call,
     });
   }
   if (step === 12) {
@@ -190,10 +191,10 @@ export async function runStep(
       kind: "opinion",
       assistantText: (r) =>
         `意見書案を作成しました。\n\n${r.overall ?? ""}`.trim(),
-      cache,
+      call,
     });
   }
-  return runDocxAndPersist(supabase, caseId, message, send, cache);
+  return runDocxAndPersist(supabase, caseId, message, send, call);
 }
 
 /**
@@ -209,7 +210,7 @@ async function runDocxAndPersist(
   caseId: string,
   message: string,
   send: SendFn,
-  cache = false,
+  call: StepCallOptions = {},
 ): Promise<boolean> {
   const STEP_NO = 14;
   const NEXT_STEP = 15;
@@ -222,7 +223,7 @@ async function runDocxAndPersist(
     );
 
     // runDocx は step_start を yield し DocxResult を返す（artifact/step_done は生成物確定後に本関数が送る）。
-    const gen = runDocx(supabase, caseId, message, cache);
+    const gen = runDocx(supabase, caseId, message, call);
     let result: DocxResult | undefined;
     while (true) {
       const { value, done } = await gen.next();

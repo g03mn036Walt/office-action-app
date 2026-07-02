@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropic } from "@/lib/anthropic/client";
 import { transcribePdfByPages } from "@/lib/anthropic/visionPdf";
 import { DOC_ROLES, labelForRole, type DocRole } from "@/lib/config/docRoles";
-import { modelForStep } from "@/lib/config/models";
+import { modelForStep, type ModelPref } from "@/lib/config/models";
 import { CASE_FILES_BUCKET } from "@/lib/config/storage";
 import { extractPdfText } from "@/lib/extract/pdfText";
 import { S2_SYSTEM_PROMPT } from "@/lib/prompts/step2";
@@ -90,9 +90,10 @@ async function analyzeNonPdf(
   role: DocRole,
   fileName: string,
   extractedText: string,
+  model?: ModelPref,
 ): Promise<{ summary: string }> {
   const final = await getAnthropic().messages.create({
-    model: modelForStep(2),
+    model: modelForStep(2, model),
     max_tokens: 4000,
     system: S2_SYSTEM_PROMPT,
     output_config: { format: { type: "json_schema", schema: SUMMARY_SCHEMA } },
@@ -119,6 +120,7 @@ export async function runAnalysis(
   caseId: string,
   message: string,
   send: (obj: unknown) => void,
+  model?: ModelPref,
 ): Promise<boolean> {
   // maxDuration=60s に対する経過計測（大部スキャンの要約を再送へ先送りするソフト締切に使う）。
   const startedAt = Date.now();
@@ -178,6 +180,7 @@ export async function runAnalysis(
               f.doc_role as DocRole,
               f.file_name,
               f.extracted_text,
+              model,
             );
             summary = r.summary;
             const { error } = await supabase
@@ -210,6 +213,7 @@ export async function runAnalysis(
                 f.doc_role as DocRole,
                 f.file_name,
                 extracted.text,
+                model,
               );
               summary = r.summary;
               const { error } = await supabase
@@ -224,6 +228,7 @@ export async function runAnalysis(
                 blob,
                 f.doc_role as DocRole,
                 f.file_name,
+                model,
               );
               // ① 連結 full_text を先に保存（冪等の要。要約が落ちても再 transcribe 不要）。
               const { error: textError } = await supabase
@@ -247,6 +252,7 @@ export async function runAnalysis(
                 f.doc_role as DocRole,
                 f.file_name,
                 full_text,
+                model,
               );
               summary = r.summary;
               const { error } = await supabase

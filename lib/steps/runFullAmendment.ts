@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { StepEvent } from "@/lib/chat/events";
 import { getAnthropic } from "@/lib/anthropic/client";
-import { modelForStep } from "@/lib/config/models";
+import { modelForStep, type StepCallOptions } from "@/lib/config/models";
 import {
   buildCaseContext,
   buildStepInput,
@@ -76,14 +76,14 @@ function parseFullAmendment(raw: string | null): FullAmendmentResult {
 async function callFullAmendment(
   ctx: CaseContext,
   userMessage: string,
-  cache: boolean,
+  opts: StepCallOptions,
 ): Promise<FullAmendmentResult> {
   const instruction = userMessage.trim() || DEFAULT_INSTRUCTION;
-  const { system, messages } = buildStepInput(ctx, S10_SYSTEM_PROMPT, instruction, cache);
+  const { system, messages } = buildStepInput(ctx, S10_SYSTEM_PROMPT, instruction, opts.cache ?? false);
 
   const final = await getAnthropic()
     .beta.messages.stream({
-      model: modelForStep(STEP),
+      model: modelForStep(STEP, opts.model),
       max_tokens: 32000,
       system,
       output_config: {
@@ -107,7 +107,7 @@ export async function* runFullAmendment(
   supabase: SupabaseClient<Database>,
   caseId: string,
   userMessage: string,
-  cache = false,
+  opts: StepCallOptions = {},
 ): AsyncGenerator<StepEvent, FullAmendmentResult, void> {
   yield { t: "step_start", step: STEP };
 
@@ -118,7 +118,7 @@ export async function* runFullAmendment(
     );
   }
 
-  const result = await callFullAmendment(ctx, userMessage, cache);
+  const result = await callFullAmendment(ctx, userMessage, opts);
 
   yield { t: "artifact", step: STEP, kind: "full_amendment", payload: result };
   yield { t: "step_done", step: STEP, currentStep: NEXT_STEP };

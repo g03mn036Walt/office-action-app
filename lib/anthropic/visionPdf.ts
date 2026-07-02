@@ -5,7 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropic } from "@/lib/anthropic/client";
 import { deleteFile, uploadPdf } from "@/lib/anthropic/files";
 import { type DocRole, labelForRole } from "@/lib/config/docRoles";
-import { modelForStep } from "@/lib/config/models";
+import { modelForStep, type ModelPref } from "@/lib/config/models";
 import { splitPdfByPages } from "@/lib/extract/pdfSplit";
 import { S2_SYSTEM_PROMPT } from "@/lib/prompts/step2";
 
@@ -94,11 +94,12 @@ async function transcribeChunk(
   pageCount: number,
   start: number,
   end: number,
+  model?: ModelPref,
 ): Promise<string> {
   const final = await withRetry(() =>
     getAnthropic()
       .beta.messages.stream({
-        model: modelForStep(2),
+        model: modelForStep(2, model),
         max_tokens: CHUNK_MAX_TOKENS,
         betas: [FILES_API_BETA],
         system: S2_SYSTEM_PROMPT,
@@ -150,6 +151,7 @@ export async function transcribePdfByPages(
   blob: Blob,
   role: DocRole,
   fileName: string,
+  model?: ModelPref,
 ): Promise<{ full_text: string }> {
   const { chunks, pageCount, ranges } = await splitPdfByPages(blob, PAGES_PER_CHUNK);
   if (pageCount === 0 || chunks.length === 0) {
@@ -173,7 +175,7 @@ export async function transcribePdfByPages(
     // 各チャンクを full_text のみ並列転写 → ページ順に連結。
     const texts = await mapLimit(fileIds, MAX_CONCURRENCY, async (fileId, i) => {
       const [s, e] = ranges[i];
-      return transcribeChunk(fileId as string, role, fileName, pageCount, s, e);
+      return transcribeChunk(fileId as string, role, fileName, pageCount, s, e, model);
     });
 
     const full_text = texts.join("\n");

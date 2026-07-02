@@ -49,7 +49,28 @@ export const STEP_MODELS: Record<StepNo, AppModel> = {
   14: SONNET_MODEL,
 };
 
-/** 指定ステップのモデルを返す。未定義ステップは既定モデル。 */
-export function modelForStep(step: StepNo): AppModel {
+/**
+ * 実行時のモデル選択（UI のモデルピッカー由来）。sonnet=標準 / opus=高品質。
+ * 送信リクエスト単位で指定され、そのリクエストで実行されるステップに適用される（永続化しない）。
+ * クライアント（ピッカー）とサーバー（run*）で共有する型（秘密値ではない）。
+ */
+export type ModelPref = "sonnet" | "opus";
+
+/**
+ * ステップ実行関数（run* / runAnalysis）に渡す呼び出しオプション。
+ * cache: オートラン継続時のみ true（§7.5）。model: UI ピッカーの選択（未指定は STEP_MODELS の既定）。
+ */
+export type StepCallOptions = {
+  cache?: boolean;
+  model?: ModelPref;
+};
+
+/**
+ * 指定ステップのモデルを返す。pref（UI ピッカーの選択）があればそれを優先し、
+ * 無ければ STEP_MODELS の既定（現状すべて Sonnet）。未定義ステップは既定モデル。
+ */
+export function modelForStep(step: StepNo, pref?: ModelPref): AppModel {
+  if (pref === "opus") return OPUS_MODEL;
+  if (pref === "sonnet") return SONNET_MODEL;
   return STEP_MODELS[step] ?? DEFAULT_MODEL;
 }

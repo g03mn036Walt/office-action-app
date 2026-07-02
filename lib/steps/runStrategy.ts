@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { StepEvent } from "@/lib/chat/events";
 import { getAnthropic } from "@/lib/anthropic/client";
-import { modelForStep } from "@/lib/config/models";
+import { modelForStep, type StepCallOptions } from "@/lib/config/models";
 import {
   buildCaseContext,
   buildStepInput,
@@ -74,14 +74,14 @@ function parseStrategy(raw: string | null): StrategyResult {
 async function callStrategy(
   ctx: CaseContext,
   userMessage: string,
-  cache: boolean,
+  opts: StepCallOptions,
 ): Promise<StrategyResult> {
   const instruction = userMessage.trim() || DEFAULT_INSTRUCTION;
-  const { system, messages } = buildStepInput(ctx, S6_SYSTEM_PROMPT, instruction, cache);
+  const { system, messages } = buildStepInput(ctx, S6_SYSTEM_PROMPT, instruction, opts.cache ?? false);
 
   const final = await getAnthropic()
     .beta.messages.stream({
-      model: modelForStep(STEP),
+      model: modelForStep(STEP, opts.model),
       max_tokens: 32000,
       system,
       output_config: { format: { type: "json_schema", schema: STRATEGY_SCHEMA } },
@@ -103,7 +103,7 @@ export async function* runStrategy(
   supabase: SupabaseClient<Database>,
   caseId: string,
   userMessage: string,
-  cache = false,
+  opts: StepCallOptions = {},
 ): AsyncGenerator<StepEvent, StrategyResult, void> {
   yield { t: "step_start", step: STEP };
 
@@ -114,7 +114,7 @@ export async function* runStrategy(
     );
   }
 
-  const result = await callStrategy(ctx, userMessage, cache);
+  const result = await callStrategy(ctx, userMessage, opts);
 
   yield { t: "artifact", step: STEP, kind: "strategies", payload: result };
   yield { t: "step_done", step: STEP, currentStep: NEXT_STEP };

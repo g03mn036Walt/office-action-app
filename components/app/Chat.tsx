@@ -4,6 +4,7 @@ import { type ReactNode, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { ArtifactKind, ChatEvent } from "@/lib/chat/events";
+import type { ModelPref } from "@/lib/config/models";
 import type {
   DocxDeliverResult,
   FullAmendmentResult,
@@ -100,6 +101,8 @@ export function Chat({
   const [stepRun, setStepRun] = useState<StepRun | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [autorunActive, setAutorunActive] = useState(false);
+  // モデルピッカー（各送信＝そのとき実行されるステップに適用。既定 Sonnet・永続化なし）。
+  const [modelPref, setModelPref] = useState<ModelPref>("sonnet");
   // オートラン継続の目標（到達させたい current_step）。サーバーの autorun_continue で設定し、
   // done 後に継続リクエストを投げる（Hobby の関数時間内に 1 ステップずつ・§7.10）。
   const autorunTargetRef = useRef<number | null>(null);
@@ -219,7 +222,8 @@ export function Chat({
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ caseId, ...body }),
+      // model はオートラン継続リクエストにも同じ選択を引き継ぐ。
+      body: JSON.stringify({ caseId, model: modelPref, ...body }),
     });
     if (!res.ok || !res.body) {
       setError("送信に失敗しました。もう一度お試しください。");
@@ -389,7 +393,12 @@ export function Chat({
 
       <div className="shrink-0 border-t border-line bg-surface px-6 py-4">
         <div className="mx-auto max-w-[720px]">
-          <ChatInput onSend={handleSend} disabled={running} />
+          <ChatInput
+            onSend={handleSend}
+            disabled={running}
+            model={modelPref}
+            onModelChange={setModelPref}
+          />
         </div>
       </div>
     </>

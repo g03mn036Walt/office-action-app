@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { StepEvent } from "@/lib/chat/events";
 import { getAnthropic } from "@/lib/anthropic/client";
-import { modelForStep } from "@/lib/config/models";
+import { modelForStep, type StepCallOptions } from "@/lib/config/models";
 import {
   buildCaseContext,
   buildStepInput,
@@ -80,15 +80,20 @@ function parseValidity(raw: string | null): ValidityResult {
 async function callValidity(
   ctx: CaseContext,
   userMessage: string,
-  cache: boolean,
+  opts: StepCallOptions,
 ): Promise<ValidityResult> {
   const instruction = userMessage.trim() || DEFAULT_INSTRUCTION;
   // 全文書＋依頼を組む。cache=true（オートラン継続）時は文書をキャッシュ可能な system に置く（§7.5）。
-  const { system, messages } = buildStepInput(ctx, S4_SYSTEM_PROMPT, instruction, cache);
+  const { system, messages } = buildStepInput(
+    ctx,
+    S4_SYSTEM_PROMPT,
+    instruction,
+    opts.cache ?? false,
+  );
 
   const final = await getAnthropic()
     .beta.messages.stream({
-      model: modelForStep(STEP),
+      model: modelForStep(STEP, opts.model),
       max_tokens: 32000,
       system,
       output_config: { format: { type: "json_schema", schema: VALIDITY_SCHEMA } },
@@ -110,7 +115,7 @@ export async function* runValidity(
   supabase: SupabaseClient<Database>,
   caseId: string,
   userMessage: string,
-  cache = false,
+  opts: StepCallOptions = {},
 ): AsyncGenerator<StepEvent, ValidityResult, void> {
   yield { t: "step_start", step: STEP };
 
@@ -121,7 +126,7 @@ export async function* runValidity(
     );
   }
 
-  const result = await callValidity(ctx, userMessage, cache);
+  const result = await callValidity(ctx, userMessage, opts);
 
   yield { t: "artifact", step: STEP, kind: "validity", payload: result };
   yield { t: "step_done", step: STEP, currentStep: NEXT_STEP };

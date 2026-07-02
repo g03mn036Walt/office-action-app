@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import type { ModelPref } from "@/lib/config/models";
 import { createClient } from "@/lib/supabase/server";
 import { nextStepToRun, runStep } from "@/lib/steps/dispatch";
 import { toUserMessage } from "@/lib/steps/errors";
@@ -37,10 +38,11 @@ async function runOneStep(
   currentStep: number,
   send: Send,
   cache = false,
+  model?: ModelPref,
 ): Promise<boolean> {
   const target = nextStepToRun(currentStep);
   if (target === "analysis") {
-    return runAnalysis(supabase, caseId, message, send);
+    return runAnalysis(supabase, caseId, message, send, model);
   }
   if (target === "unsupported") {
     send({
@@ -50,7 +52,7 @@ async function runOneStep(
     });
     return false;
   }
-  return runStep(supabase, caseId, message, target, send, cache);
+  return runStep(supabase, caseId, message, target, send, { cache, model });
 }
 
 /**
@@ -88,6 +90,8 @@ export async function POST(request: NextRequest) {
   let message = "";
   // オートラン継続リクエストのとき、到達させたい current_step（クライアントが echo する）。
   let autorunTo: number | null = null;
+  // UI モデルピッカーの選択（sonnet=標準 / opus=高品質。未指定・不正値は既定＝Sonnet）。
+  let model: ModelPref | undefined;
   try {
     const body = await request.json();
     if (typeof body?.caseId === "string") caseId = body.caseId.trim();
@@ -95,6 +99,9 @@ export async function POST(request: NextRequest) {
     if (typeof body?.autorunTo === "number") {
       // 妥当な停止点の範囲に丸める（不正値でも暴走しないよう上限 15）。
       autorunTo = Math.min(Math.max(Math.trunc(body.autorunTo), 5), 15);
+    }
+    if (body?.model === "sonnet" || body?.model === "opus") {
+      model = body.model;
     }
   } catch {
     // body 不正は下の caseId チェックで弾く
@@ -136,7 +143,15 @@ export async function POST(request: NextRequest) {
         if (autorunTo != null) {
           // オートラン継続リクエスト: 分類せず次の 1 ステップを実行し、未達なら継続を促す。
           // 連続実行なので文書ブロックをキャッシュする（§7.5）。
-          ok = await runOneStep(supabase, caseId, "", caseRow.current_step, send, true);
+          ok = await runOneStep(
+            supabase,
+            caseId,
+            "",
+            caseRow.current_step,
+            send,
+            true,
+            model,
+          );
           if (ok) await maybeSignalAutorun(supabase, caseId, autorunTo, send);
         } else {
           // 初回リクエスト: 自由入力の意図を分類（§10）。空入力・失敗時は安全側の advance。
@@ -149,6 +164,7 @@ export async function POST(request: NextRequest) {
               message,
               caseRow.current_step,
               send,
+              model,
             );
           } else if (intent.mode === "ambiguous") {
             // 意図が掴めない場合は短い確認を返す（進めない）。
@@ -168,6 +184,7 @@ export async function POST(request: NextRequest) {
               caseRow.current_step,
               send,
               true,
+              model,
             );
             if (ok) {
               await maybeSignalAutorun(
@@ -185,6 +202,8 @@ export async function POST(request: NextRequest) {
               message,
               caseRow.current_step,
               send,
+              false,
+              model,
             );
           }
         }

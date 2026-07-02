@@ -4,7 +4,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { ChatEvent } from "@/lib/chat/events";
 import { getAnthropic } from "@/lib/anthropic/client";
-import { modelForStep, type StepNo } from "@/lib/config/models";
+import {
+  modelForStep,
+  type ModelPref,
+  type StepNo,
+} from "@/lib/config/models";
 import { buildCaseContext } from "@/lib/context/buildContext";
 import { FOLLOWUP_SYSTEM_PROMPT } from "@/lib/prompts/followup";
 import { toUserMessage } from "@/lib/steps/errors";
@@ -28,6 +32,7 @@ export async function runFollowup(
   message: string,
   currentStep: number,
   send: (ev: ChatEvent) => void,
+  modelPref?: ModelPref,
 ): Promise<boolean> {
   try {
     await saveUserMessage(supabase, caseId, currentStep, message.trim());
@@ -41,8 +46,11 @@ export async function runFollowup(
 
     const userContent = `【検討対象の文書（保存済みテキスト）】\n\n${ctx.documentsBlock}\n\n---\n\n【質問・依頼】\n${message.trim()}`;
 
-    // 進捗は変えないので、モデルは現ステップ相当のものを使う（未定義なら既定）。
-    const model = modelForStep(Math.min(Math.max(currentStep, 1), 14) as StepNo);
+    // 進捗は変えないので、モデルは現ステップ相当のものを使う（UI ピッカーの選択があれば優先）。
+    const model = modelForStep(
+      Math.min(Math.max(currentStep, 1), 14) as StepNo,
+      modelPref,
+    );
 
     const stream = getAnthropic().messages.stream({
       model,
