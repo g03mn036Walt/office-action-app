@@ -100,3 +100,58 @@ export async function buildCaseContext(
 
   return { documentsBlock, history, documentCount };
 }
+
+/**
+ * beta.messages.stream に渡す system（キャッシュ時はテキストブロック配列、非キャッシュ時は文字列）。
+ * cache_control を付けた最初のブロックまでがキャッシュ対象になる。
+ */
+export type CacheableSystem =
+  | string
+  | Array<{
+      type: "text";
+      text: string;
+      cache_control?: { type: "ephemeral" };
+    }>;
+
+/**
+ * ステップ実行（S4+ の構造化出力）に渡す system / messages を組み立てる（PRD §7.5）。
+ *
+ * cache=true（オートラン継続時のみ）: 大きな文書ブロックをキャッシュ可能な安定プレフィックス（system[0]）に
+ *   置き、`cache_control` を付ける。連続実行の各リクエストは数秒間隔なので既定（5 分）キャッシュに当たり、
+ *   同一文書の再送コストを削減できる（読み取りで TTL も更新される）。手動モードは TTL 切れで無駄打ちに
+ *   なりやすいため付けない（§7.5）。
+ * cache=false（手動）: 従来と同一の形（文書はユーザーメッセージ内、system は文字列）。挙動を変えない。
+ *
+ * 文言（ヘッダ・依頼・スキーマ厳守の一文）は cache/非 cache で同一にし、出力の差異を生まないようにする。
+ */
+export function buildStepInput(
+  ctx: CaseContext,
+  systemPrompt: string,
+  instruction: string,
+  cache: boolean,
+): { system: CacheableSystem; messages: ContextMessage[] } {
+  const docBlock = `【検討対象の文書（保存済みテキスト）】\n\n${ctx.documentsBlock}`;
+  const closing = "\n\n出力は指定された JSON スキーマに厳密に従ってください。";
+  if (cache) {
+    return {
+      system: [
+        { type: "text", text: docBlock, cache_control: { type: "ephemeral" } },
+        { type: "text", text: systemPrompt },
+      ],
+      messages: [
+        ...ctx.history,
+        { role: "user", content: `【依頼】\n${instruction}${closing}` },
+      ],
+    };
+  }
+  return {
+    system: systemPrompt,
+    messages: [
+      ...ctx.history,
+      {
+        role: "user",
+        content: `${docBlock}\n\n---\n\n【依頼】\n${instruction}${closing}`,
+      },
+    ],
+  };
+}

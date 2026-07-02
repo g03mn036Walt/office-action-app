@@ -5,7 +5,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { StepEvent } from "@/lib/chat/events";
 import { getAnthropic } from "@/lib/anthropic/client";
 import { modelForStep } from "@/lib/config/models";
-import { buildCaseContext, type CaseContext } from "@/lib/context/buildContext";
+import {
+  buildCaseContext,
+  buildStepInput,
+  type CaseContext,
+} from "@/lib/context/buildContext";
 import { S12_SYSTEM_PROMPT } from "@/lib/prompts/step12";
 import { OPINION_SCHEMA, type OpinionResult } from "@/lib/steps/schemas";
 import type { Database } from "@/lib/database.types";
@@ -70,17 +74,18 @@ function parseOpinion(raw: string | null): OpinionResult {
 async function callOpinion(
   ctx: CaseContext,
   userMessage: string,
+  cache: boolean,
 ): Promise<OpinionResult> {
   const instruction = userMessage.trim() || DEFAULT_INSTRUCTION;
-  const userContent = `【検討対象の文書（保存済みテキスト）】\n\n${ctx.documentsBlock}\n\n---\n\n【依頼】\n${instruction}\n\n出力は指定された JSON スキーマに厳密に従ってください。`;
+  const { system, messages } = buildStepInput(ctx, S12_SYSTEM_PROMPT, instruction, cache);
 
   const final = await getAnthropic()
     .beta.messages.stream({
       model: modelForStep(STEP),
       max_tokens: 32000,
-      system: S12_SYSTEM_PROMPT,
+      system,
       output_config: { format: { type: "json_schema", schema: OPINION_SCHEMA } },
-      messages: [...ctx.history, { role: "user", content: userContent }],
+      messages,
     })
     .finalMessage();
 
@@ -98,6 +103,7 @@ export async function* runOpinion(
   supabase: SupabaseClient<Database>,
   caseId: string,
   userMessage: string,
+  cache = false,
 ): AsyncGenerator<StepEvent, OpinionResult, void> {
   yield { t: "step_start", step: STEP };
 
@@ -108,7 +114,7 @@ export async function* runOpinion(
     );
   }
 
-  const result = await callOpinion(ctx, userMessage);
+  const result = await callOpinion(ctx, userMessage, cache);
 
   yield { t: "artifact", step: STEP, kind: "opinion", payload: result };
   yield { t: "step_done", step: STEP, currentStep: NEXT_STEP };

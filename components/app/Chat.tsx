@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { ArtifactKind, ChatEvent } from "@/lib/chat/events";
@@ -43,10 +43,15 @@ type RunDoc = {
   error?: string;
 };
 
-/** Step4+ の実行中状態（1 リクエスト＝1 ステップ）。 */
+/**
+ * Step4+ の実行中状態（1 リクエスト＝1 ステップ）。
+ * mode="step": 正規ステップの実行（Step N のヘッダ＋成果物）。
+ * mode="text": 追問への回答など、ステップを進めない逐次テキスト（アシスタント吹き出しで表示）。
+ */
 type StepRun = {
   step: number;
   status: "running" | "done" | "error";
+  mode: "step" | "text";
   text: string;
   artifact: { kind: ArtifactKind; payload: unknown } | null;
 };
@@ -94,6 +99,10 @@ export function Chat({
   const [runDocs, setRunDocs] = useState<RunDoc[]>([]);
   const [stepRun, setStepRun] = useState<StepRun | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [autorunActive, setAutorunActive] = useState(false);
+  // オートラン継続の目標（到達させたい current_step）。サーバーの autorun_continue で設定し、
+  // done 後に継続リクエストを投げる（Hobby の関数時間内に 1 ステップずつ・§7.10）。
+  const autorunTargetRef = useRef<number | null>(null);
 
   function applyEvent(ev: ChatEvent) {
     switch (ev.t) {
@@ -128,17 +137,20 @@ export function Chat({
         setStepRun({
           step: ev.step,
           status: "running",
+          mode: "step",
           text: "",
           artifact: null,
         });
         break;
       case "text_delta":
+        // text_delta のみで始まる流れ＝追問の回答（mode="text"）。step_start 先行なら mode を保つ。
         setStepRun((s) =>
           s
             ? { ...s, text: s.text + ev.text }
             : {
                 step: ev.step,
                 status: "running",
+                mode: "text",
                 text: ev.text,
                 artifact: null,
               },
@@ -151,6 +163,7 @@ export function Chat({
             : {
                 step: ev.step,
                 status: "running",
+                mode: "step",
                 text: "",
                 artifact: { kind: ev.kind, payload: ev.payload },
               },
@@ -160,7 +173,11 @@ export function Chat({
         setStepRun((s) => (s ? { ...s, status: "done" } : s));
         break;
       case "autorun_advance":
-        // オートランは後続スライスで対応（現状は単一ステップ実行のみ）。
+        // 進捗表示用（現状は未使用。継続制御は autorun_continue で行う）。
+        break;
+      case "autorun_continue":
+        // まだ目標に達していない。done 後に継続リクエストを投げる（handleSend のループが参照）。
+        autorunTargetRef.current = ev.target;
         break;
       case "error":
         if (ev.fileName) {
@@ -178,8 +195,13 @@ export function Chat({
         break;
       case "done":
         // 一部失敗 / 文書なし（ok===false）は進捗・エラー表示を保持（再送で残りを進める）。
-        // 全件成功時のみ楽観表示を破棄し、サーバーの確定メッセージを取り直す。
         if (ev.ok === false) break;
+        // オートラン継続中（次ステップあり）は軽くリセットのみ（refresh せず userBubble も保持）。
+        if (autorunTargetRef.current != null) {
+          setStepRun(null);
+          break;
+        }
+        // 最終ステップのみ楽観表示を破棄し、サーバーの確定メッセージを取り直す。
         setUserBubble(null);
         setRunDocs([]);
         setStepRun(null);
@@ -189,6 +211,47 @@ export function Chat({
     }
   }
 
+  /** 1 リクエスト分のストリームを読み、done の ok を返す（applyEvent で逐次反映）。 */
+  async function runOnce(body: {
+    message?: string;
+    autorunTo?: number;
+  }): Promise<boolean> {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caseId, ...body }),
+    });
+    if (!res.ok || !res.body) {
+      setError("送信に失敗しました。もう一度お試しください。");
+      return false;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let ok = true;
+    const handleLine = (line: string) => {
+      if (!line.trim()) return;
+      try {
+        const ev = JSON.parse(line) as ChatEvent;
+        if (ev.t === "done") ok = ev.ok !== false;
+        applyEvent(ev);
+      } catch {
+        // 不完全/不正な行は無視
+      }
+    };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (value) buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) handleLine(line);
+      if (done) break;
+    }
+    if (buf.trim()) handleLine(buf);
+    return ok;
+  }
+
   async function handleSend(text: string) {
     if (running) return;
     setRunning(true);
@@ -196,52 +259,35 @@ export function Chat({
     setRunDocs([]);
     setStepRun(null);
     setUserBubble(text.trim() || "（実行）");
+    autorunTargetRef.current = null;
 
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ caseId, message: text }),
-      });
-      if (!res.ok || !res.body) {
-        setError("送信に失敗しました。もう一度お試しください。");
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (value) buf += decoder.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            applyEvent(JSON.parse(line) as ChatEvent);
-          } catch {
-            // 不完全/不正な行は無視
-          }
-        }
-        if (done) break;
-      }
-      if (buf.trim()) {
-        try {
-          applyEvent(JSON.parse(buf) as ChatEvent);
-        } catch {
-          // 無視
-        }
+      let ok = await runOnce({ message: text });
+      // オートラン: サーバーが autorun_continue を送る間、目標まで 1 ステップずつ継続する。
+      // 全 14 ステップ相当を上限にした反復ガード（万一ステップが前進しなくても暴走させない）。
+      let iterations = 0;
+      while (ok && autorunTargetRef.current != null && iterations < 16) {
+        iterations += 1;
+        const target = autorunTargetRef.current;
+        autorunTargetRef.current = null; // 継続が続けばサーバーが再設定する
+        setAutorunActive(true);
+        setStepRun(null);
+        ok = await runOnce({ autorunTo: target });
       }
     } catch {
       setError("通信エラーが発生しました。もう一度お試しください。");
     } finally {
+      autorunTargetRef.current = null;
+      setAutorunActive(false);
       setRunning(false);
     }
   }
 
   const showRun =
-    userBubble !== null || runDocs.length > 0 || stepRun !== null;
+    userBubble !== null ||
+    runDocs.length > 0 ||
+    stepRun !== null ||
+    autorunActive;
 
   return (
     <>
@@ -271,6 +317,11 @@ export function Chat({
           {showRun && (
             <div className="space-y-4">
               {userBubble !== null && <Bubble role="user" content={userBubble} />}
+              {autorunActive && (
+                <p className="text-[12.5px] text-muted">
+                  オートラン実行中… 目標ステップまで自動で進めています。
+                </p>
+              )}
               {runDocs.length > 0 && (
                 <div className="flex justify-start">
                   <div className="max-w-[85%] space-y-3 rounded-[14px] border border-line bg-surface px-4 py-3 text-[14px] leading-relaxed text-ink">
@@ -300,7 +351,18 @@ export function Chat({
                   </div>
                 </div>
               )}
-              {stepRun && (
+              {stepRun && stepRun.mode === "text" && (
+                // 追問の回答（ステップは進めない）。アシスタント吹き出しとして逐次表示。
+                <div className="space-y-2">
+                  {stepRun.text && (
+                    <Bubble role="assistant" content={stepRun.text} />
+                  )}
+                  {stepRun.status === "running" && !stepRun.text && (
+                    <p className="text-[13px] text-muted">回答中…</p>
+                  )}
+                </div>
+              )}
+              {stepRun && stepRun.mode === "step" && (
                 <div className="space-y-3">
                   <div className="text-[13px] font-semibold text-ink-soft">
                     {stepRun.status === "running" && `Step ${stepRun.step} 実行中…`}

@@ -5,7 +5,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { StepEvent } from "@/lib/chat/events";
 import { getAnthropic } from "@/lib/anthropic/client";
 import { modelForStep } from "@/lib/config/models";
-import { buildCaseContext, type CaseContext } from "@/lib/context/buildContext";
+import {
+  buildCaseContext,
+  buildStepInput,
+  type CaseContext,
+} from "@/lib/context/buildContext";
 import { S4_SYSTEM_PROMPT } from "@/lib/prompts/step4";
 import { VALIDITY_SCHEMA, type ValidityResult } from "@/lib/steps/schemas";
 import type { Database } from "@/lib/database.types";
@@ -76,18 +80,19 @@ function parseValidity(raw: string | null): ValidityResult {
 async function callValidity(
   ctx: CaseContext,
   userMessage: string,
+  cache: boolean,
 ): Promise<ValidityResult> {
   const instruction = userMessage.trim() || DEFAULT_INSTRUCTION;
-  // 最新ターンに全文書（保存済みテキスト）と依頼を載せる。直前までの会話は history で交互に渡す。
-  const userContent = `【検討対象の文書（保存済みテキスト）】\n\n${ctx.documentsBlock}\n\n---\n\n【依頼】\n${instruction}\n\n出力は指定された JSON スキーマに厳密に従ってください。`;
+  // 全文書＋依頼を組む。cache=true（オートラン継続）時は文書をキャッシュ可能な system に置く（§7.5）。
+  const { system, messages } = buildStepInput(ctx, S4_SYSTEM_PROMPT, instruction, cache);
 
   const final = await getAnthropic()
     .beta.messages.stream({
       model: modelForStep(STEP),
       max_tokens: 32000,
-      system: S4_SYSTEM_PROMPT,
+      system,
       output_config: { format: { type: "json_schema", schema: VALIDITY_SCHEMA } },
-      messages: [...ctx.history, { role: "user", content: userContent }],
+      messages,
     })
     .finalMessage();
 
@@ -105,6 +110,7 @@ export async function* runValidity(
   supabase: SupabaseClient<Database>,
   caseId: string,
   userMessage: string,
+  cache = false,
 ): AsyncGenerator<StepEvent, ValidityResult, void> {
   yield { t: "step_start", step: STEP };
 
@@ -115,7 +121,7 @@ export async function* runValidity(
     );
   }
 
-  const result = await callValidity(ctx, userMessage);
+  const result = await callValidity(ctx, userMessage, cache);
 
   yield { t: "artifact", step: STEP, kind: "validity", payload: result };
   yield { t: "step_done", step: STEP, currentStep: NEXT_STEP };

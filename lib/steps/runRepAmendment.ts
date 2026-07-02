@@ -5,7 +5,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { StepEvent } from "@/lib/chat/events";
 import { getAnthropic } from "@/lib/anthropic/client";
 import { modelForStep } from "@/lib/config/models";
-import { buildCaseContext, type CaseContext } from "@/lib/context/buildContext";
+import {
+  buildCaseContext,
+  buildStepInput,
+  type CaseContext,
+} from "@/lib/context/buildContext";
 import { S8_SYSTEM_PROMPT } from "@/lib/prompts/step8";
 import {
   REP_AMENDMENT_SCHEMA,
@@ -73,19 +77,20 @@ function parseRepAmendment(raw: string | null): RepAmendmentResult {
 async function callRepAmendment(
   ctx: CaseContext,
   userMessage: string,
+  cache: boolean,
 ): Promise<RepAmendmentResult> {
   const instruction = userMessage.trim() || DEFAULT_INSTRUCTION;
-  const userContent = `【検討対象の文書（保存済みテキスト）】\n\n${ctx.documentsBlock}\n\n---\n\n【依頼】\n${instruction}\n\n出力は指定された JSON スキーマに厳密に従ってください。`;
+  const { system, messages } = buildStepInput(ctx, S8_SYSTEM_PROMPT, instruction, cache);
 
   const final = await getAnthropic()
     .beta.messages.stream({
       model: modelForStep(STEP),
       max_tokens: 32000,
-      system: S8_SYSTEM_PROMPT,
+      system,
       output_config: {
         format: { type: "json_schema", schema: REP_AMENDMENT_SCHEMA },
       },
-      messages: [...ctx.history, { role: "user", content: userContent }],
+      messages,
     })
     .finalMessage();
 
@@ -103,6 +108,7 @@ export async function* runRepAmendment(
   supabase: SupabaseClient<Database>,
   caseId: string,
   userMessage: string,
+  cache = false,
 ): AsyncGenerator<StepEvent, RepAmendmentResult, void> {
   yield { t: "step_start", step: STEP };
 
@@ -113,7 +119,7 @@ export async function* runRepAmendment(
     );
   }
 
-  const result = await callRepAmendment(ctx, userMessage);
+  const result = await callRepAmendment(ctx, userMessage, cache);
 
   yield { t: "artifact", step: STEP, kind: "rep_amendment", payload: result };
   yield { t: "step_done", step: STEP, currentStep: NEXT_STEP };
